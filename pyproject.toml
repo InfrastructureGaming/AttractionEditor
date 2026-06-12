@@ -1,0 +1,27 @@
+[project]
+name = "attraction-editor"
+version = "0.1.0"
+description = "Authoring and packaging tool for custom OpenRCT2 flat-ride objects"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+]
+
+[project.scripts]
+attraction-editor = "attraction_editor.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
