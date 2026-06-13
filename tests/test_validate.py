@@ -9,14 +9,17 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from attraction_editor.model.project import AnimationPhase, AnimationProgram
 from attraction_editor.sprites.scanner import frame_path
 from attraction_editor.sprites.validate import (
     alpha_bbox,
     detect_duplicate_trajectories,
     has_any_alpha,
     validate_frame_set,
+    validate_programs,
     validate_project,
 )
+from tests.fixtures.synthetic import make_synthetic_project
 from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
 
 SIZE = 8
@@ -129,3 +132,101 @@ def test_validate_project_tilt_a_whirl_has_no_errors():
     for name, report in reports.items():
         errors = [i for i in report.issues if i.severity == "error"]
         assert errors == [], f"{name}: {errors}"
+
+
+def test_validate_programs_valid():
+    program = AnimationProgram(
+        name="Normal",
+        phases=[
+            AnimationPhase(name="Start", frame_start=0, frame_count=8, next_phase=1),
+            AnimationPhase(
+                name="Loop",
+                frame_start=8,
+                frame_count=16,
+                next_phase=2,
+                repeat_until_rotations_complete=True,
+            ),
+            AnimationPhase(name="End", frame_start=24, frame_count=8, is_final_phase=True),
+        ],
+    )
+
+    class _Project:
+        frames_per_dir = 32
+        programs = [program]
+
+    assert validate_programs(_Project()) == []
+
+
+def test_validate_programs_frame_count_must_be_positive():
+    program = AnimationProgram(
+        name="Bad",
+        phases=[AnimationPhase(name="Empty", frame_start=0, frame_count=0)],
+    )
+
+    class _Project:
+        frames_per_dir = 32
+        programs = [program]
+
+    issues = validate_programs(_Project())
+
+    assert len(issues) == 1
+    assert issues[0].severity == "error"
+    assert "frame_count must be positive" in issues[0].message
+
+
+def test_validate_programs_frame_range_out_of_bounds():
+    program = AnimationProgram(
+        name="Overflow",
+        phases=[AnimationPhase(name="TooFar", frame_start=24, frame_count=16)],
+    )
+
+    class _Project:
+        frames_per_dir = 32
+        programs = [program]
+
+    issues = validate_programs(_Project())
+
+    assert len(issues) == 1
+    assert issues[0].severity == "error"
+    assert "out of range for frames_per_dir=32" in issues[0].message
+
+
+def test_validate_programs_next_phase_out_of_range():
+    program = AnimationProgram(
+        name="Dangling",
+        phases=[AnimationPhase(name="Only", frame_start=0, frame_count=4, next_phase=5)],
+    )
+
+    class _Project:
+        frames_per_dir = 32
+        programs = [program]
+
+    issues = validate_programs(_Project())
+
+    assert len(issues) == 1
+    assert issues[0].severity == "error"
+    assert "next_phase=5 is out of range" in issues[0].message
+
+
+def test_validate_project_includes_programs_report(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    project.programs = [
+        AnimationProgram(
+            name="Normal",
+            phases=[AnimationPhase(name="Only", frame_start=0, frame_count=2, is_final_phase=True)],
+        )
+    ]
+
+    reports = validate_project(project)
+
+    assert "Programs" in reports
+    assert reports["Programs"].ok
+
+
+def test_validate_project_omits_programs_report_when_empty(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    assert project.programs == []
+
+    reports = validate_project(project)
+
+    assert "Programs" not in reports

@@ -135,11 +135,54 @@ def detect_duplicate_trajectories(reports: dict[str, FrameSetReport]) -> list[Va
     return issues
 
 
+def validate_programs(project: RideProject) -> list[ValidationIssue]:
+    """Validate AnimationProgram/AnimationPhase frame ranges and next_phase
+    references against project.frames_per_dir (the TOTAL combined frame count
+    across all phases of all programs, when project.programs is non-empty)."""
+    issues: list[ValidationIssue] = []
+
+    for program in project.programs:
+        num_phases = len(program.phases)
+        for phase in program.phases:
+            if phase.frame_count <= 0:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"Program {program.name!r} phase {phase.name!r}: frame_count must be "
+                        f"positive, got {phase.frame_count}",
+                    )
+                )
+                continue
+
+            frame_end = phase.frame_start + phase.frame_count
+            if phase.frame_start < 0 or frame_end > project.frames_per_dir:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"Program {program.name!r} phase {phase.name!r}: frames "
+                        f"[{phase.frame_start}, {frame_end}) out of range for "
+                        f"frames_per_dir={project.frames_per_dir}",
+                    )
+                )
+
+            if not (0 <= phase.next_phase < num_phases):
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        f"Program {program.name!r} phase {phase.name!r}: next_phase="
+                        f"{phase.next_phase} is out of range (program has {num_phases} phases)",
+                    )
+                )
+
+    return issues
+
+
 def validate_project(project: RideProject) -> dict[str, FrameSetReport]:
     """Validate the core structure and every rider car's frame set, plus
-    cross-car duplicate-trajectory detection. Returns a dict keyed by
-    "Core" / car.name; cross-car issues are appended to each involved
-    report's issue list."""
+    cross-car duplicate-trajectory detection and (if project.programs is
+    non-empty) animation phase/program frame-range checks. Returns a dict
+    keyed by "Core" / car.name / "Programs"; cross-car issues are appended to
+    each involved report's issue list."""
     if project.project_dir is None:
         raise ValueError("RideProject.project_dir is not set")
 
@@ -157,5 +200,8 @@ def validate_project(project: RideProject) -> dict[str, FrameSetReport]:
         for name in car_reports:
             if f"{name!r}" in issue.message:
                 reports[name].issues.append(issue)
+
+    if project.programs:
+        reports["Programs"] = FrameSetReport(name="Programs", issues=validate_programs(project))
 
     return reports

@@ -12,6 +12,7 @@ from attraction_editor.ui.anchor_editor_panel import AnchorEditorPanel
 from attraction_editor.ui.animation_player_panel import AnimationPlayerPanel
 from attraction_editor.ui.build_panel import BuildPanel
 from attraction_editor.ui.colour_preview_panel import ColourPreviewPanel
+from attraction_editor.ui.program_editor_panel import ProgramEditorPanel
 from attraction_editor.ui.project_panel import ProjectPanel
 from attraction_editor.ui.sprite_browser_panel import SpriteBrowserPanel
 
@@ -31,6 +32,7 @@ class MainWindow(QMainWindow):
         self.anchor_editor_panel = AnchorEditorPanel()
         self.colour_preview_panel = ColourPreviewPanel()
         self.animation_player_panel = AnimationPlayerPanel()
+        self.program_editor_panel = ProgramEditorPanel()
         self.build_panel = BuildPanel()
 
         tabs = QTabWidget()
@@ -39,6 +41,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.anchor_editor_panel, "Anchors")
         tabs.addTab(self.colour_preview_panel, "Colours")
         tabs.addTab(self.animation_player_panel, "Animation")
+        tabs.addTab(self.program_editor_panel, "Programs & Phases")
         tabs.addTab(self.build_panel, "Build")
         self.setCentralWidget(tabs)
 
@@ -72,6 +75,7 @@ class MainWindow(QMainWindow):
         self.anchor_editor_panel.set_project(project)
         self.colour_preview_panel.set_project(project)
         self.animation_player_panel.set_project(project)
+        self.program_editor_panel.set_project(project)
         self.build_panel.set_project(project)
 
         self.setWindowTitle(f"Attraction Editor - {project.name}")
