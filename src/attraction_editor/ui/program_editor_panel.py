@@ -75,14 +75,15 @@ class ProgramEditorPanel(QWidget):
 
         self.phase_name_edit = QLineEdit()
         self.frame_start_spin = QSpinBox()
-        self.frame_start_spin.setRange(0, 511)
+        self.frame_start_spin.setRange(0, 1023)
         self.frame_count_spin = QSpinBox()
-        self.frame_count_spin.setRange(1, 512)
+        self.frame_count_spin.setRange(1, 1024)
         self.ticks_per_frame_spin = QSpinBox()
         self.ticks_per_frame_spin.setRange(1, 60)
         self.next_phase_combo = _NoWheelComboBox()
         self.repeat_check = QCheckBox("Repeat until ride.rotations complete")
         self.final_check = QCheckBox("Final phase (ends program -> arriving)")
+        self.reset_rotations_check = QCheckBox("Reset rotation count on entry")
 
         phase_form = QFormLayout()
         phase_form.addRow("Name", self.phase_name_edit)
@@ -92,6 +93,7 @@ class ProgramEditorPanel(QWidget):
         phase_form.addRow("Next phase", self.next_phase_combo)
         phase_form.addRow(self.repeat_check)
         phase_form.addRow(self.final_check)
+        phase_form.addRow(self.reset_rotations_check)
 
         phase_box = QGroupBox("Phases")
         phase_layout = QVBoxLayout()
@@ -138,6 +140,7 @@ class ProgramEditorPanel(QWidget):
         self.next_phase_combo.currentIndexChanged.connect(self._on_phase_field_changed)
         self.repeat_check.toggled.connect(self._on_phase_field_changed)
         self.final_check.toggled.connect(self._on_phase_field_changed)
+        self.reset_rotations_check.toggled.connect(self._on_phase_field_changed)
 
         self.setEnabled(False)
 
@@ -241,6 +244,7 @@ class ProgramEditorPanel(QWidget):
                 self.ticks_per_frame_spin.setValue(1)
                 self.repeat_check.setChecked(False)
                 self.final_check.setChecked(False)
+                self.reset_rotations_check.setChecked(False)
             else:
                 self.phase_name_edit.setText(phase.name)
                 self.frame_start_spin.setValue(phase.frame_start)
@@ -250,6 +254,7 @@ class ProgramEditorPanel(QWidget):
                     self.next_phase_combo.setCurrentIndex(phase.next_phase)
                 self.repeat_check.setChecked(phase.repeat_until_rotations_complete)
                 self.final_check.setChecked(phase.is_final_phase)
+                self.reset_rotations_check.setChecked(phase.reset_rotations_on_entry)
         finally:
             self._loading = False
 
@@ -297,6 +302,7 @@ class ProgramEditorPanel(QWidget):
         phase.next_phase = max(0, self.next_phase_combo.currentIndex())
         phase.repeat_until_rotations_complete = self.repeat_check.isChecked()
         phase.is_final_phase = self.final_check.isChecked()
+        phase.reset_rotations_on_entry = self.reset_rotations_check.isChecked()
 
         self.phase_list.item(self.phase_list.currentRow()).setText(phase.name)
         # Renaming this phase may affect other phases' next_phase combo labels.

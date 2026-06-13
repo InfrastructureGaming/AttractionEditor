@@ -32,6 +32,9 @@ class AnimationPhase:
     repeat_until_rotations_complete replays this phase (NumRotations++) until
     NumRotations >= ride.rotations, then advances to next_phase.
     is_final_phase (when not repeating) ends the program -> Status::arriving.
+    reset_rotations_on_entry zeroes NumRotations when this phase is entered,
+    giving it its own independent ride.rotations budget. Needed when a
+    program has more than one repeat_until_rotations_complete phase.
     """
 
     name: str
@@ -41,6 +44,7 @@ class AnimationPhase:
     next_phase: int = 0
     repeat_until_rotations_complete: bool = False
     is_final_phase: bool = False
+    reset_rotations_on_entry: bool = False
 
 
 @dataclass

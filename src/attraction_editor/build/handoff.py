@@ -25,11 +25,11 @@ def _pascal_case(name: str) -> str:
 def _time_to_sprite_map_values(phase: AnimationPhase) -> list[int]:
     """Expand a phase's [frame_start, frame_start + frame_count) range into a
     time-indexed sprite-frame sequence, each frame repeated ticks_per_frame
-    times, terminated by the 0xFF end-of-phase sentinel."""
+    times, terminated by the 0xFFFF end-of-phase sentinel."""
     values: list[int] = []
     for frame in range(phase.frame_start, phase.frame_start + phase.frame_count):
         values.extend([frame] * max(1, phase.ticks_per_frame))
-    values.append(0xFF)
+    values.append(0xFFFF)
     return values
 
 
@@ -37,7 +37,7 @@ def _format_map_values(values: list[int]) -> list[str]:
     lines: list[str] = []
     for i in range(0, len(values), _MAP_VALUES_PER_LINE):
         chunk = values[i : i + _MAP_VALUES_PER_LINE]
-        lines.append("    " + ", ".join(("0xFF" if v == 0xFF else str(v)) for v in chunk) + ",")
+        lines.append("    " + ", ".join(("0xFFFF" if v == 0xFFFF else str(v)) for v in chunk) + ",")
     return lines
 
 
@@ -61,7 +61,7 @@ def generate_animation_program_cpp(project: RideProject) -> str:
 
         for ph_idx, phase in enumerate(program.phases):
             map_name = f"k{base}Program{p_idx}Phase{ph_idx}"
-            lines.append(f"static constexpr uint8_t {map_name}[] = {{")
+            lines.append(f"static constexpr uint16_t {map_name}[] = {{")
             lines.extend(_format_map_values(_time_to_sprite_map_values(phase)))
             lines.append("};")
             lines.append("")
@@ -76,8 +76,9 @@ def generate_animation_program_cpp(project: RideProject) -> str:
                 next_name = f"<out of range: {phase.next_phase}>"
             repeat = "true" if phase.repeat_until_rotations_complete else "false"
             final = "true" if phase.is_final_phase else "false"
+            reset_rotations = "true" if phase.reset_rotations_on_entry else "false"
             lines.append(
-                f"    {{ {map_name}, {phase.next_phase}, {repeat}, {final} }}, "
+                f"    {{ {map_name}, {phase.next_phase}, {repeat}, {final}, {reset_rotations} }}, "
                 f"// {phase.name!r} -> {next_name!r}"
             )
         lines.append("};")

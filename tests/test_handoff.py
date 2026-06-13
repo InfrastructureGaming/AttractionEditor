@@ -59,14 +59,14 @@ def test_generate_animation_program_cpp(tmp_path):
 
     cpp = generate_animation_program_cpp(project)
 
-    assert "static constexpr uint8_t kSyntheticProgram0Phase0[] = {" in cpp
-    assert "    0, 1, 0xFF," in cpp
-    assert "static constexpr uint8_t kSyntheticProgram0Phase1[] = {" in cpp
-    assert "    2, 3, 0xFF," in cpp
+    assert "static constexpr uint16_t kSyntheticProgram0Phase0[] = {" in cpp
+    assert "    0, 1, 0xFFFF," in cpp
+    assert "static constexpr uint16_t kSyntheticProgram0Phase1[] = {" in cpp
+    assert "    2, 3, 0xFFFF," in cpp
 
     assert "static constexpr FlatRideAnimationPhase kSyntheticProgram0Phases[] = {" in cpp
-    assert "{ kSyntheticProgram0Phase0, 1, false, false }, // 'Start' -> 'End'" in cpp
-    assert "{ kSyntheticProgram0Phase1, 0, false, true }, // 'End' -> 'Start'" in cpp
+    assert "{ kSyntheticProgram0Phase0, 1, false, false, false }, // 'Start' -> 'End'" in cpp
+    assert "{ kSyntheticProgram0Phase1, 0, false, true, false }, // 'End' -> 'Start'" in cpp
 
     assert "static constexpr FlatRideAnimationProgram kSyntheticPrograms[] = {" in cpp
     assert "{ kSyntheticProgram0Phases, 2 }, // 'Normal'" in cpp

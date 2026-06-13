@@ -53,6 +53,7 @@ def test_set_project_loads_existing_programs(qtbot, tmp_path):
     assert panel.frame_count_spin.value() == 1
     assert panel.next_phase_combo.currentIndex() == 1
     assert not panel.repeat_check.isChecked()
+    assert not panel.reset_rotations_check.isChecked()
 
 
 def test_add_program_and_phase(qtbot, tmp_path):
@@ -124,6 +125,11 @@ def test_phase_field_edits_update_project(qtbot, tmp_path):
     changed.clear()
     panel.next_phase_combo.setCurrentIndex(0)
     assert phase.next_phase == 0
+    assert changed
+
+    changed.clear()
+    panel.reset_rotations_check.setChecked(True)
+    assert phase.reset_rotations_on_entry is True
     assert changed
 
 
