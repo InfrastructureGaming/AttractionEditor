@@ -46,7 +46,7 @@ class ProjectPanel(QWidget):
         self.category_combo.addItems(RIDE_CATEGORIES)
 
         self.frames_per_dir_spin = QSpinBox()
-        self.frames_per_dir_spin.setRange(1, 1024)
+        self.frames_per_dir_spin.setRange(1, 65535)
 
         self.sprite_width_spin = QSpinBox()
         self.sprite_width_spin.setRange(0, 1024)

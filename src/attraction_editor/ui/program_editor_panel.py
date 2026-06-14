@@ -75,9 +75,9 @@ class ProgramEditorPanel(QWidget):
 
         self.phase_name_edit = QLineEdit()
         self.frame_start_spin = QSpinBox()
-        self.frame_start_spin.setRange(0, 1023)
+        self.frame_start_spin.setRange(0, 65534)
         self.frame_count_spin = QSpinBox()
-        self.frame_count_spin.setRange(1, 1024)
+        self.frame_count_spin.setRange(1, 65535)
         self.ticks_per_frame_spin = QSpinBox()
         self.ticks_per_frame_spin.setRange(1, 60)
         self.next_phase_combo = _NoWheelComboBox()
