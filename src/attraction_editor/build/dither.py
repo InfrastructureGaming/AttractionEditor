@@ -11,6 +11,15 @@ depends only on pixel position, not neighbours, so it's the only one of the
 three immune to that - but which algorithm a given layer uses is always the
 layer author's choice (Layer.dither_algorithm), not inferred from Layer.kind.
 
+Every algorithm, including Floyd-Steinberg, honours Layer.dither_strength
+(0-32, default 32 = full dithering, 0 = plain nearest-match with no
+dithering at all). PIL's built-in F-S quantisation (used for speed, since
+this is the default algorithm - see dither_frame) has no native intensity
+knob, so dither_frame blends it with the plain result via a deterministic
+Bayer-pattern mask rather than reducing the effect smoothly per pixel the
+way Atkinson's diffuse_fraction does; visually similar, implemented
+differently to avoid a slow manual diffusion loop on the common path.
+
 Primary-remap palette entries (243-254) are excluded from the output, matching
 openrct2-cli's IsChangablePixel() behaviour which also excludes that range from
 nearest-colour matching.  Output pixels carry exact StandardPalette RGB values
@@ -96,32 +105,60 @@ def _fix_sentinel_pixels(indexed: Image.Image) -> None:
                 px[x, y] = _nearest_valid_index(idx)  # type: ignore[index]
 
 
-def dither_frame(img: Image.Image) -> Image.Image:
+def _quantise_to_real_rgb(rgb_img: Image.Image, *, dither: Image.Dither) -> Image.Image:
+    """Quantise `rgb_img` (mode "RGB") into the sentinel-excluded palette
+    with the given PIL dither mode, then expand back to exact real-palette
+    RGB values (see dither_frame's docstring for why: the sentinel palette
+    only exists to keep primary-remap slots out of the nearest-neighbour
+    race, real output pixels must carry the actual StandardPalette colour)."""
+    indexed = rgb_img.quantize(palette=_build_quantise_palette(), dither=dither)
+    _fix_sentinel_pixels(indexed)
+    real_pal = indexed.copy()
+    real_pal.putpalette(_real_palette_flat())
+    return real_pal.convert("RGB")
+
+
+def dither_frame(img: Image.Image, *, strength: int = 32) -> Image.Image:
     """Return an RGBA copy of `img` with Floyd-Steinberg dithering into the
     RCT2 StandardPalette, preserving the alpha channel.
 
     Primary-remap indices (243-254) are excluded from the quantisation target,
     so the result is safe to pass to openrct2-cli -m closest.  Every output
     pixel is the exact RGB value of its assigned StandardPalette entry.
+
+    `strength` (0-32, default 32 = full classic Floyd-Steinberg) lets a layer
+    author dial the effect back, the same way dither_frame_bayer/_atkinson's
+    `strength` does. PIL's built-in F-S dithering (used here for speed - this
+    is the default algorithm, so a slow per-pixel Python loop here would cost
+    every layer, not just ones that opt into a strength below 32) has no
+    native intensity knob, so strength<32 instead blends the fully-dithered
+    result with the plain (undithered) nearest-match result, deterministically
+    selecting per pixel via the same Bayer threshold pattern
+    dither_frame_bayer uses for its own perturbation - this keeps the
+    blend repeatable frame to frame (no flicker) and reuses an already-fast
+    code path rather than adding a second, slower dithering implementation.
+    At strength=32 this returns byte-identical output to always having
+    selected the dithered value (today's original, only behaviour).
     """
     rgba = img.convert("RGBA")
     alpha = rgba.getchannel("A")
+    rgb = rgba.convert("RGB")
 
-    # Quantise RGB with F-S dithering.  The sentinel palette ensures that
-    # primary-remap slots lose every nearest-neighbour race.
-    indexed = rgba.convert("RGB").quantize(
-        palette=_build_quantise_palette(),
-        dither=Image.Dither.FLOYDSTEINBERG,
-    )
+    dithered_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.FLOYDSTEINBERG)
 
-    # Safety net: remap any pixel that landed on a sentinel index.
-    _fix_sentinel_pixels(indexed)
-
-    # Expand to RGB using the REAL palette so pixel values are exact
-    # StandardPalette colours that -m closest will match exactly.
-    real_pal = indexed.copy()
-    real_pal.putpalette(_real_palette_flat())
-    rgb_result = real_pal.convert("RGB")
+    strength = min(32, max(0, strength))
+    if strength < 32:
+        plain_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.NONE)
+        h, w = rgba.size[1], rgba.size[0]
+        tile = np.tile(_bayer_matrix_8x8(), (h // 8 + 1, w // 8 + 1))[:h, :w]
+        # Bayer matrix values run 0..63; a pixel keeps the dithered value
+        # only if its threshold falls below strength's share of that range.
+        use_dithered = tile < (strength / 32.0) * 64
+        dithered_arr = np.asarray(dithered_rgb)
+        plain_arr = np.asarray(plain_rgb)
+        rgb_result = Image.fromarray(np.where(use_dithered[:, :, None], dithered_arr, plain_arr), mode="RGB")
+    else:
+        rgb_result = dithered_rgb
 
     result = rgb_result.convert("RGBA")
     result.putalpha(alpha)
@@ -254,11 +291,15 @@ def _apply_catch_tolerance_bias(img: Image.Image, trim_tolerance: int, tertiary_
 
     dist_sq = pixel_distances_to_palette(rgb_arr)
     palette = np.array(load_standard_palette(), dtype=np.uint8)
+    global_min_idx = np.argmin(dist_sq, axis=1)
+    global_min_dist_sq = np.min(dist_sq, axis=1)
 
     for zone_start, tolerance in ((SECONDARY_REMAP_START, trim_tolerance), (TERTIARY_REMAP_START, tertiary_tolerance)):
         if tolerance == 0:
             continue
-        caught, shade_idx, natural_win, best_other_idx = classify_remap_zone(dist_sq, zone_start, tolerance)
+        caught, shade_idx, natural_win, best_other_idx = classify_remap_zone(
+            dist_sq, zone_start, tolerance, global_min_dist_sq=global_min_dist_sq, global_min_idx=global_min_idx
+        )
         pulled_in = caught & ~natural_win
         pushed_out = natural_win & ~caught
         flat[pulled_in] = palette[zone_start + shade_idx[pulled_in]]
@@ -291,7 +332,7 @@ def dither_frame_by_algorithm(
 
     biased = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
     if algorithm == "floyd_steinberg":
-        return dither_frame(biased)
+        return dither_frame(biased, strength=strength)
     if algorithm == "bayer":
         return dither_frame_bayer(biased, strength=strength)
     if algorithm == "atkinson":

@@ -67,9 +67,16 @@ def pixel_distances_to_palette(rgb_arr: np.ndarray) -> np.ndarray:
     Returns shape (N, 256). Computed via the sum-of-squares expansion
     (|a-b|^2 = |a|^2 - 2a.b + |b|^2) so the result is a matmul rather than a
     materialized (N, 256, 3) difference array - this matters because N is
-    every pixel in a full sprite frame."""
-    flat = rgb_arr.reshape(-1, 3).astype(np.float64)
-    palette = np.array(load_standard_palette(), dtype=np.float64)
+    every pixel in a full sprite frame.
+
+    float32 throughout: distance-squared values for 0-255 RGB channels never
+    exceed 3*255^2 = 195075, comfortably inside float32's exactly-representable
+    integer range (up to 2^24), so this loses no precision while roughly
+    halving the matmul's cost versus float64 - this function runs on every
+    animation-preview tick once a colour scheme or catch tolerance is in use
+    (see classify_remap_zone), so that cost matters."""
+    flat = rgb_arr.reshape(-1, 3).astype(np.float32)
+    palette = np.array(load_standard_palette(), dtype=np.float32)
     sq_sum_px = np.sum(flat**2, axis=1)
     sq_sum_pal = np.sum(palette**2, axis=1)
     cross = flat @ palette.T
@@ -78,7 +85,12 @@ def pixel_distances_to_palette(rgb_arr: np.ndarray) -> np.ndarray:
 
 
 def classify_remap_zone(
-    dist_sq: np.ndarray, zone_start: int, tolerance: int
+    dist_sq: np.ndarray,
+    zone_start: int,
+    tolerance: int,
+    *,
+    global_min_dist_sq: np.ndarray | None = None,
+    global_min_idx: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Classify every pixel (whose distances to all 256 palette entries are
     in `dist_sq`, shape (N, 256)) as caught by the REMAP_LENGTH-entry remap
@@ -96,6 +108,17 @@ def classify_remap_zone(
     outright is excluded unless its margin of victory over the best
     alternative is at least `abs(tolerance)` - filtering out borderline wins.
 
+    `global_min_dist_sq`/`global_min_idx` (each shape (N,), from
+    `dist_sq.min(axis=1)`/`dist_sq.argmin(axis=1)`) let a caller classifying
+    both zones from the same `dist_sq` compute the global nearest-match
+    once and pass it to both calls, instead of every call re-deriving it -
+    see remap_preview/_apply_catch_tolerance_bias. For most pixels (whose
+    global best match isn't even in this zone), that's *also* this zone's
+    best alternative, with no further search needed - only pixels whose
+    single nearest match across all 256 entries falls inside this specific
+    zone (a small minority, in practice) need the more expensive
+    zone-excluded search.
+
     Returns (caught, shade_idx, natural_win, best_other_idx), each shape
     (N,). `shade_idx` (0..REMAP_LENGTH-1) is the nearest shade within the
     zone, valid regardless of `caught`. `natural_win` is the pixel's
@@ -112,11 +135,24 @@ def classify_remap_zone(
     shade_idx = np.argmin(zone_dists, axis=1)
     best_zone_dist = np.sqrt(np.min(zone_dists, axis=1))
 
-    masked = dist_sq.copy()
-    masked[:, zone_start:zone_end] = np.inf
-    best_other_idx = np.argmin(masked, axis=1)
-    best_other_dist = np.sqrt(np.min(masked, axis=1))
+    if global_min_dist_sq is None or global_min_idx is None:
+        global_min_idx = np.argmin(dist_sq, axis=1)
+        global_min_dist_sq = np.min(dist_sq, axis=1)
 
+    best_other_idx = global_min_idx.copy()
+    best_other_dist_sq = global_min_dist_sq.copy()
+
+    in_zone = (global_min_idx >= zone_start) & (global_min_idx < zone_end)
+    if np.any(in_zone):
+        # Only the (typically small) subset whose single global-nearest
+        # match falls inside this zone needs a proper zone-excluded
+        # re-search - copying just that subset, not the full (N, 256) array.
+        masked = dist_sq[in_zone].copy()
+        masked[:, zone_start:zone_end] = np.inf
+        best_other_idx[in_zone] = np.argmin(masked, axis=1)
+        best_other_dist_sq[in_zone] = np.min(masked, axis=1)
+
+    best_other_dist = np.sqrt(best_other_dist_sq)
     natural_win = best_zone_dist <= best_other_dist
 
     if tolerance >= 0:
@@ -171,9 +207,15 @@ def remap_preview(
     rgb_arr = np.array(rgba.convert("RGB"), dtype=np.uint8)
     h, w = rgb_arr.shape[:2]
     dist_sq = pixel_distances_to_palette(rgb_arr)
+    global_min_idx = np.argmin(dist_sq, axis=1)
+    global_min_dist_sq = np.min(dist_sq, axis=1)
 
-    secondary_caught, secondary_idx, _, _ = classify_remap_zone(dist_sq, SECONDARY_REMAP_START, trim_tolerance)
-    tertiary_caught, tertiary_idx, _, _ = classify_remap_zone(dist_sq, TERTIARY_REMAP_START, tertiary_tolerance)
+    secondary_caught, secondary_idx, _, _ = classify_remap_zone(
+        dist_sq, SECONDARY_REMAP_START, trim_tolerance, global_min_dist_sq=global_min_dist_sq, global_min_idx=global_min_idx
+    )
+    tertiary_caught, tertiary_idx, _, _ = classify_remap_zone(
+        dist_sq, TERTIARY_REMAP_START, tertiary_tolerance, global_min_dist_sq=global_min_dist_sq, global_min_idx=global_min_idx
+    )
 
     # Resolve the (in practice vanishingly rare) case where both zones claim
     # the same pixel - whichever zone it's actually closer to wins.
@@ -194,7 +236,9 @@ def remap_preview(
     result_flat[tertiary_caught] = tertiary_ramp[tertiary_idx[tertiary_caught]]
 
     if body_colour is not None:
-        primary_caught, primary_idx, _, _ = classify_remap_zone(dist_sq, PRIMARY_REMAP_START, 0)
+        primary_caught, primary_idx, _, _ = classify_remap_zone(
+            dist_sq, PRIMARY_REMAP_START, 0, global_min_dist_sq=global_min_dist_sq, global_min_idx=global_min_idx
+        )
         primary_ramp = np.array([palette[i] for i in ramps[body_colour]])
         result_flat[primary_caught] = primary_ramp[primary_idx[primary_caught]]
 

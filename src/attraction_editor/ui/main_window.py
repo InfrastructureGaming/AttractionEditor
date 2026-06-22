@@ -225,8 +225,11 @@ class MainWindow(QMainWindow):
         self.anchor_editor_panel.reload()
 
     def _on_project_panel_changed(self) -> None:
+        # Sprite dimensions etc. aren't part of AnimationPlayerPanel's frame
+        # cache key (see that module's docstring) - invalidate explicitly.
         self.colour_preview_panel.refresh_from_project()
         self.sprite_browser_panel._reload_frame_set_list()
+        self.animation_player_panel._invalidate_frame_cache()
         self.animation_player_panel._update_frame()
         self.anchor_editor_panel.reload()
 
@@ -234,9 +237,11 @@ class MainWindow(QMainWindow):
         # Layer order/content/dithering choice (and rider-car list changes,
         # which also live on this panel) all feed the composite, which every
         # other preview panel renders from - refresh them all. Anchor last -
-        # see _on_direction_changed's comment on why.
+        # see _on_direction_changed's comment on why. Layer edits aren't part
+        # of AnimationPlayerPanel's frame cache key either - invalidate explicitly.
         self.sprite_browser_panel._reload_frame_set_list()
         self.colour_preview_panel._reload_preview()
+        self.animation_player_panel._invalidate_frame_cache()
         self.animation_player_panel._reload_car_checks()
         self.animation_player_panel._update_frame()
         self.anchor_editor_panel.reload()

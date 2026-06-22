@@ -12,6 +12,22 @@ Colours section's "Apply Scheme" button (see ColourPreviewPanel); otherwise
 shows the raw, as-shipped structure, since the real build never recolours
 either.
 
+Caches each (direction, frame_index) structure composite (everything
+composite_preview_frame produces, before rider-car overlays are added) so
+looping playback re-renders each frame only once per pass through the
+configuration that produced it. This matters once a colour scheme or catch
+tolerance is in use: classifying every pixel against the full StandardPalette
+(see palette/remap.py's classify_remap_zone) costs tens of milliseconds per
+frame even with that module's own optimisations, which a 20-60Hz playback
+timer calling composite_preview_frame fresh on every tick would otherwise pay
+on every single loop instead of just the first. The cache key includes the
+active scheme's identity, the dither checkbox, and both catch tolerances, so
+it can never serve a stale frame for the wrong settings - changing any of
+those simply misses the cache and renders fresh, no separate invalidation
+plumbing required. Edits that change the underlying layer images themselves
+(layer/project edits) aren't reflected in the key, so set_project() and
+_invalidate_frame_cache() explicitly clear it.
+
 Renders into the shared PreviewWidget (see ui/preview_widget.py) rather than
 its own QLabel - set_preview_widget()/set_direction_combo()/
 set_active_scheme_getter()/set_dither_checkbox() must be called before
@@ -43,6 +59,11 @@ from attraction_editor.ui.preview_widget import PreviewWidget
 
 DEFAULT_FPS = 20
 
+# Cap on cached structure composites - bounds memory for projects with very
+# large frame counts (frames_per_dir can go up to 65535) while still fully
+# covering the common case (looping a few hundred frames at most).
+_FRAME_CACHE_LIMIT = 256
+
 
 class AnimationPlayerPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -54,6 +75,7 @@ class AnimationPlayerPanel(QWidget):
         self._active_scheme_getter: Callable[[], ColourScheme | None] | None = None
         self.frame_index = 0
         self.car_checks: dict[str, QCheckBox] = {}
+        self._frame_cache: dict[tuple, Image.Image] = {}
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._advance)
@@ -109,9 +131,18 @@ class AnimationPlayerPanel(QWidget):
         self.timer.stop()
         self.play_button.setChecked(False)
         self.play_button.setText("Play")
+        self._invalidate_frame_cache()
         self._reload_car_checks()
         self._update_frame()
         self.setEnabled(True)
+
+    def _invalidate_frame_cache(self) -> None:
+        """Call after any edit that changes the underlying layer images
+        themselves (layer reordering/sprite-dir/dither-algorithm changes,
+        sprite dimensions, a new project) - those aren't reflected in the
+        cache key (see this module's docstring), unlike scheme/dither/
+        tolerance changes, which invalidate automatically."""
+        self._frame_cache.clear()
 
     def _reload_car_checks(self) -> None:
         while self.car_checks_layout.count():
@@ -163,13 +194,24 @@ class AnimationPlayerPanel(QWidget):
         scheme = self._active_scheme_getter() if self._active_scheme_getter else None
         dither = self.dither_check.isChecked() if self.dither_check is not None else False
 
-        try:
-            composite = composite_preview_frame(
-                self.project, direction, self.frame_index, dither=dither, scheme=scheme
-            )
-        except FileNotFoundError as exc:
-            self.frame_counter_label.setText(f"Frame {self.frame_index} - preview unavailable ({exc})")
-            return
+        cache_key = (
+            direction,
+            self.frame_index,
+            id(scheme) if scheme is not None else None,
+            dither,
+            self.project.trim_catch_tolerance,
+            self.project.tertiary_catch_tolerance,
+        )
+        composite = self._frame_cache.get(cache_key)
+        if composite is None:
+            try:
+                composite = composite_preview_frame(self.project, direction, self.frame_index, dither=dither, scheme=scheme)
+            except FileNotFoundError as exc:
+                self.frame_counter_label.setText(f"Frame {self.frame_index} - preview unavailable ({exc})")
+                return
+            if len(self._frame_cache) >= _FRAME_CACHE_LIMIT:
+                self._frame_cache.pop(next(iter(self._frame_cache)))
+            self._frame_cache[cache_key] = composite
 
         for car in self.project.cars:
             checkbox = self.car_checks.get(car.name)

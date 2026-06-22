@@ -90,6 +90,10 @@ class LayersPanel(QWidget):
         self.algorithm_combo.addItems(_ALGORITHM_ORDER)
         self.strength_spin = QSpinBox()
         self.strength_spin.setRange(0, 255)
+        self.strength_spin.setToolTip(
+            "0 = no dithering (plain nearest-match), 32 = full classic dithering for the\n"
+            "chosen algorithm (the default). Values above 32 have no further effect."
+        )
 
         form = QFormLayout()
         form.addRow("Name", self.name_edit)

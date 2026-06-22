@@ -115,6 +115,52 @@ def test_dither_frame_opaque_input_stays_opaque():
             assert out_px[x, y][3] == 255
 
 
+def test_dither_frame_default_strength_is_byte_identical_to_explicit_32():
+    """Regression guard for the default-argument value itself, independent
+    of any caller's behaviour."""
+    img = _make_gradient_rgba(32, 32)
+    assert list(dither_frame(img).getdata()) == list(dither_frame(img, strength=32).getdata())
+
+
+def test_dither_frame_strength_zero_is_plain_nearest_match():
+    """strength=0 must degenerate to the same plain (undithered)
+    nearest-match result dither_frame_bayer's strength=0 produces - no
+    dithering pattern at all, just each pixel's closest palette entry."""
+    img = _make_gradient_rgba(32, 32)
+    assert list(dither_frame(img, strength=0).getdata()) == list(dither_frame_bayer(img, strength=0).getdata())
+
+
+def test_dither_frame_strength_changes_the_output():
+    """Regression test for "changing dither strength has no visual effect" -
+    dither_frame previously had no strength parameter at all; the spinbox
+    silently did nothing whenever a layer used the default
+    floyd_steinberg algorithm."""
+    img = _make_gradient_rgba(32, 32)
+    full = dither_frame(img, strength=32)
+    half = dither_frame(img, strength=16)
+    none_ = dither_frame(img, strength=0)
+
+    assert list(half.getdata()) != list(full.getdata())
+    assert list(half.getdata()) != list(none_.getdata())
+    assert list(none_.getdata()) != list(full.getdata())
+
+
+def test_dither_frame_strength_is_clamped_to_0_32_range():
+    """The UI's strength spinbox allows up to 255 (shared range across all
+    three algorithms) - values above 32 must behave like 32, not error or
+    keep scaling."""
+    img = _make_gradient_rgba(16, 16)
+    assert list(dither_frame(img, strength=32).getdata()) == list(dither_frame(img, strength=255).getdata())
+    assert list(dither_frame(img, strength=0).getdata()) == list(dither_frame(img, strength=-10).getdata())
+
+
+def test_dither_frame_by_algorithm_floyd_steinberg_passes_strength_through():
+    img = _make_gradient_rgba(16, 16)
+    assert list(dither_frame_by_algorithm(img, "floyd_steinberg", strength=10).getdata()) == list(
+        dither_frame(img, strength=10).getdata()
+    )
+
+
 # ---------------------------------------------------------------------------
 # dither_frame_bayer
 # ---------------------------------------------------------------------------
