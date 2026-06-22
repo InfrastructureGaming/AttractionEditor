@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 from functools import lru_cache
 
+import numpy as np
 from PIL import Image
 
 _DATA_DIR = Path(__file__).resolve().parent
@@ -50,15 +51,6 @@ def load_colour_ramps() -> dict[str, list[int]]:
     return json.loads((_DATA_DIR / "colour_ramps.json").read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=1)
-def _palette_image() -> Image.Image:
-    """A 1x1 "P" image carrying the full StandardPalette, suitable for
-    Image.quantize(palette=...)."""
-    img = Image.new("P", (1, 1))
-    img.putpalette([component for rgb in load_standard_palette() for component in rgb])
-    return img
-
-
 def colour_swatch_rgb(colour: str) -> tuple[int, int, int]:
     """A representative RGB swatch for `colour`, taken from the middle of its
     12-shade ramp - useful for UI colour pickers."""
@@ -69,31 +61,143 @@ def colour_swatch_rgb(colour: str) -> tuple[int, int, int]:
     return (r, g, b)
 
 
-def remap_preview(image: Image.Image, trim_colour: str, tertiary_colour: str, body_colour: str | None = None) -> Image.Image:
+def pixel_distances_to_palette(rgb_arr: np.ndarray) -> np.ndarray:
+    """Squared RGB Euclidean distance from every pixel in `rgb_arr` (shape
+    (H, W, 3) or (N, 3)) to every one of the 256 StandardPalette entries.
+    Returns shape (N, 256). Computed via the sum-of-squares expansion
+    (|a-b|^2 = |a|^2 - 2a.b + |b|^2) so the result is a matmul rather than a
+    materialized (N, 256, 3) difference array - this matters because N is
+    every pixel in a full sprite frame."""
+    flat = rgb_arr.reshape(-1, 3).astype(np.float64)
+    palette = np.array(load_standard_palette(), dtype=np.float64)
+    sq_sum_px = np.sum(flat**2, axis=1)
+    sq_sum_pal = np.sum(palette**2, axis=1)
+    cross = flat @ palette.T
+    dist_sq = sq_sum_px[:, None] - 2 * cross + sq_sum_pal[None, :]
+    return np.clip(dist_sq, 0, None)  # guard tiny negative float error
+
+
+def classify_remap_zone(
+    dist_sq: np.ndarray, zone_start: int, tolerance: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Classify every pixel (whose distances to all 256 palette entries are
+    in `dist_sq`, shape (N, 256)) as caught by the REMAP_LENGTH-entry remap
+    zone starting at `zone_start`, or not - given a catch-tolerance in plain
+    (non-squared) RGB-distance units.
+
+    tolerance == 0 reproduces the original fixed behaviour exactly: a pixel
+    is caught only if the zone's own best-matching shade is *also* its
+    single nearest match among all 256 entries (today's `-m closest`-style
+    nearest-colour rule). tolerance > 0 widens the net: a pixel is also
+    caught if the zone's best shade is within `tolerance` RGB-distance
+    units of beating its actual best alternative, even though it doesn't
+    win outright - this is what "catches" borderline EEVEE-lit pixels that
+    fall just short. tolerance < 0 narrows it: a pixel that *would* win
+    outright is excluded unless its margin of victory over the best
+    alternative is at least `abs(tolerance)` - filtering out borderline wins.
+
+    Returns (caught, shade_idx, natural_win, best_other_idx), each shape
+    (N,). `shade_idx` (0..REMAP_LENGTH-1) is the nearest shade within the
+    zone, valid regardless of `caught`. `natural_win` is the pixel's
+    tolerance=0 classification - callers that need to avoid disturbing
+    pixels that already resolve correctly on their own (build/dither.py)
+    use `caught & ~natural_win` (pulled in by widening) and
+    `natural_win & ~caught` (excluded by narrowing) to find exactly the
+    pixels a nonzero tolerance actually changes. `best_other_idx` (0..255)
+    is the nearest *non-zone* palette entry, the snap target for pixels
+    excluded by narrowing.
+    """
+    zone_end = zone_start + REMAP_LENGTH
+    zone_dists = dist_sq[:, zone_start:zone_end]
+    shade_idx = np.argmin(zone_dists, axis=1)
+    best_zone_dist = np.sqrt(np.min(zone_dists, axis=1))
+
+    masked = dist_sq.copy()
+    masked[:, zone_start:zone_end] = np.inf
+    best_other_idx = np.argmin(masked, axis=1)
+    best_other_dist = np.sqrt(np.min(masked, axis=1))
+
+    natural_win = best_zone_dist <= best_other_dist
+
+    if tolerance >= 0:
+        caught = natural_win | (best_zone_dist <= best_other_dist + tolerance)
+    else:
+        margin = best_other_dist - best_zone_dist
+        caught = natural_win & (margin >= -tolerance)
+
+    return caught, shade_idx, natural_win, best_other_idx
+
+
+def remap_preview(
+    image: Image.Image,
+    trim_colour: str,
+    tertiary_colour: str,
+    body_colour: str | None = None,
+    *,
+    trim_tolerance: int = 0,
+    tertiary_tolerance: int = 0,
+) -> Image.Image:
     """Return an RGBA copy of `image` with its secondary/tertiary remap-range
-    pixels recoloured according to `trim_colour`/`tertiary_colour`.
+    pixels recoloured according to `trim_colour`/`tertiary_colour`. Every
+    other pixel keeps its original, un-quantized RGB value - only the
+    matched remap-zone pixels are touched.
+
+    This matters for dithering: an earlier version of this function ran a
+    nearest-match `quantize()` over the *entire* image first, then remapped
+    via a palette LUT. That hard-snapped every pixel to an exact palette
+    entry with zero residual error, so a dithering pass run afterward
+    (build/dither.py's dither_frame_by_algorithm) had nothing left to
+    diffuse - "Preview dithering" silently became a no-op for any frame
+    that had gone through this function. Only replacing the specific
+    remap-zone pixels (which are meant to be flat reference shades anyway)
+    leaves the rest of the smooth EEVEE-rendered surface untouched, so a
+    later dithering pass still has real quantisation error to work with.
+
+    `trim_tolerance`/`tertiary_tolerance` (see classify_remap_zone) widen or
+    narrow which pixels count as "in" each zone - normally sourced from
+    RideProject.trim_catch_tolerance/tertiary_catch_tolerance, so this
+    preview matches what build/dither.py will actually catch for the real
+    build (see render_layer_frame's docstring for why dithering, not this
+    function, is what determines the *shipped* sprite's classification).
 
     `body_colour`, if given, also remaps the primary range (243-254) -
     included for completeness even though no pixel from a `-m closest`
-    Blender render can land there in practice.
+    Blender render can land there in practice. Never tolerance-adjusted,
+    since it's already moot in practice.
     """
     rgba = image.convert("RGBA")
     alpha = rgba.getchannel("A")
 
-    indexed = rgba.convert("RGB").quantize(palette=_palette_image(), dither=Image.Dither.NONE)
+    rgb_arr = np.array(rgba.convert("RGB"), dtype=np.uint8)
+    h, w = rgb_arr.shape[:2]
+    dist_sq = pixel_distances_to_palette(rgb_arr)
 
+    secondary_caught, secondary_idx, _, _ = classify_remap_zone(dist_sq, SECONDARY_REMAP_START, trim_tolerance)
+    tertiary_caught, tertiary_idx, _, _ = classify_remap_zone(dist_sq, TERTIARY_REMAP_START, tertiary_tolerance)
+
+    # Resolve the (in practice vanishingly rare) case where both zones claim
+    # the same pixel - whichever zone it's actually closer to wins.
+    both = secondary_caught & tertiary_caught
+    if np.any(both):
+        sec_dist = np.min(dist_sq[:, SECONDARY_REMAP_START : SECONDARY_REMAP_START + REMAP_LENGTH], axis=1)
+        ter_dist = np.min(dist_sq[:, TERTIARY_REMAP_START : TERTIARY_REMAP_START + REMAP_LENGTH], axis=1)
+        secondary_caught = secondary_caught & ~(both & (ter_dist < sec_dist))
+        tertiary_caught = tertiary_caught & ~(both & (sec_dist <= ter_dist))
+
+    palette = load_standard_palette()
     ramps = load_colour_ramps()
-    lut = list(range(256))
-    for i in range(REMAP_LENGTH):
-        lut[SECONDARY_REMAP_START + i] = ramps[trim_colour][i]
-        lut[TERTIARY_REMAP_START + i] = ramps[tertiary_colour][i]
+
+    result_flat = rgb_arr.reshape(-1, 3).copy()
+    trim_ramp = np.array([palette[i] for i in ramps[trim_colour]])
+    tertiary_ramp = np.array([palette[i] for i in ramps[tertiary_colour]])
+    result_flat[secondary_caught] = trim_ramp[secondary_idx[secondary_caught]]
+    result_flat[tertiary_caught] = tertiary_ramp[tertiary_idx[tertiary_caught]]
+
     if body_colour is not None:
-        for i in range(REMAP_LENGTH):
-            lut[PRIMARY_REMAP_START + i] = ramps[body_colour][i]
+        primary_caught, primary_idx, _, _ = classify_remap_zone(dist_sq, PRIMARY_REMAP_START, 0)
+        primary_ramp = np.array([palette[i] for i in ramps[body_colour]])
+        result_flat[primary_caught] = primary_ramp[primary_idx[primary_caught]]
 
-    remapped = indexed.point(lut)
-    remapped.putpalette([component for rgb in load_standard_palette() for component in rgb])
-
-    result = remapped.convert("RGBA")
+    result = Image.fromarray(result_flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
     result.putalpha(alpha)
     return result

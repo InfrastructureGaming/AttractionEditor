@@ -14,6 +14,7 @@ from attraction_editor.build.dither import (
 from attraction_editor.palette.remap import (
     PRIMARY_REMAP_START,
     REMAP_LENGTH,
+    SECONDARY_REMAP_START,
     load_standard_palette,
 )
 
@@ -248,6 +249,66 @@ def test_dither_frame_by_algorithm_none_returns_unchanged_rgba():
     img = _make_gradient_rgba(16, 16)
     out = dither_frame_by_algorithm(img, "none")
     assert out.mode == "RGBA"
+    assert list(out.getdata()) == list(img.convert("RGBA").getdata())
+
+
+# ---------------------------------------------------------------------------
+# dither_frame_by_algorithm's trim_tolerance/tertiary_tolerance (catch
+# tolerance bias - see palette/remap.py's classify_remap_zone)
+# ---------------------------------------------------------------------------
+
+# [143, 31, 58] is 1.86 RGB-distance units closer to a non-zone palette
+# entry than to secondary remap shade 3 - it doesn't win that shade's
+# nearest-match race on its own (see test_remap.py's classify_remap_zone
+# tests, which derive and verify this exact figure).
+_BORDERLINE_SECONDARY_RGB = (143, 31, 58)
+
+
+def _make_flat_rgba(rgb: tuple[int, int, int], size: int = 8) -> Image.Image:
+    return Image.new("RGBA", (size, size), (*rgb, 255))
+
+
+def test_catch_tolerance_zero_is_a_no_op_for_every_algorithm():
+    """Default tolerance (0, 0) must reproduce calling the underlying
+    function directly - existing dithering behaviour is byte-identical
+    whenever this feature isn't in use."""
+    img = _make_gradient_rgba(16, 16)
+
+    assert list(dither_frame_by_algorithm(img, "floyd_steinberg", trim_tolerance=0, tertiary_tolerance=0).getdata()) == list(
+        dither_frame(img).getdata()
+    )
+    assert list(
+        dither_frame_by_algorithm(img, "bayer", strength=16, trim_tolerance=0, tertiary_tolerance=0).getdata()
+    ) == list(dither_frame_bayer(img, strength=16).getdata())
+    assert list(
+        dither_frame_by_algorithm(img, "atkinson", strength=16, trim_tolerance=0, tertiary_tolerance=0).getdata()
+    ) == list(dither_frame_atkinson(img, strength=16).getdata())
+
+
+def test_catch_tolerance_widening_pulls_borderline_pixels_into_the_zone():
+    """A flat image of the borderline colour sits almost exactly between two
+    competing palette entries (margin 1.86), so even at tolerance=0 plain
+    F-S dithering naturally checkerboards between the two rather than
+    picking either uniformly. Widening past that margin pre-snaps every
+    pixel exactly onto the zone shade *before* F-S runs, leaving it zero
+    residual error to diffuse - the dithered result becomes fully uniform."""
+    img = _make_flat_rgba(_BORDERLINE_SECONDARY_RGB)
+    target_rgb = tuple(load_standard_palette()[SECONDARY_REMAP_START + 3])
+
+    untouched = dither_frame_by_algorithm(img, "floyd_steinberg", trim_tolerance=0)
+    widened = dither_frame_by_algorithm(img, "floyd_steinberg", trim_tolerance=2)
+
+    assert any(px[:3] != target_rgb for px in untouched.getdata())  # still a dithered checkerboard
+    assert all(px[:3] == target_rgb for px in widened.getdata())  # fully pulled in, no residual error left
+
+
+def test_catch_tolerance_does_not_apply_to_none_algorithm():
+    """"none" is the artist's explicit choice to skip quantisation entirely -
+    a nonzero tolerance must not sneak in any palette-snapping there."""
+    img = _make_flat_rgba(_BORDERLINE_SECONDARY_RGB)
+
+    out = dither_frame_by_algorithm(img, "none", trim_tolerance=100)
+
     assert list(out.getdata()) == list(img.convert("RGBA").getdata())
 
 

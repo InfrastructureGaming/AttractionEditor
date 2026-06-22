@@ -142,6 +142,15 @@ class RideProject:
     # show by default. Written into object.json's properties.carColours on
     # build - never baked into the shipped sprite pixels.
     colour_schemes: list[ColourScheme] = field(default_factory=lambda: [ColourScheme("white", "white")])
+    # Widen (positive) or narrow (negative) which pixels count as inside the
+    # secondary/tertiary remap zones during dithering (see build/dither.py's
+    # _apply_catch_tolerance_bias) - plain RGB-distance units, 0 = exact
+    # nearest-match only (no change from the original fixed behaviour).
+    # Lets the artist catch borderline EEVEE-lit pixels that fall just
+    # outside a zone without endlessly re-tuning scene lighting/materials,
+    # at the cost of some quantisation accuracy for the pixels it touches.
+    trim_catch_tolerance: int = 0
+    tertiary_catch_tolerance: int = 0
     output_name: str = ""
     deploy_dir: str | None = None
     openrct2_cli_path: str | None = None

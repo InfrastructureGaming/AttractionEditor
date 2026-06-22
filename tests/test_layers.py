@@ -125,6 +125,67 @@ def test_render_layer_frame_preview_recolours_remap_zones(tmp_path):
     assert not (TERTIARY_REMAP_START <= idx1 < TERTIARY_REMAP_START + REMAP_LENGTH)
 
 
+def test_render_layer_frame_preview_uses_project_catch_tolerance(tmp_path):
+    """render_layer_frame_preview must read RideProject.trim_catch_tolerance
+    too, so the colour-scheme preview matches what the real build (via
+    render_layer_frame) will actually catch."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+    sprite_dir = project.project_dir / layer.sprite_dir
+
+    img = Image.new("RGBA", (1, 1), (143, 31, 58, 255))  # see borderline note above
+    img.save(frame_path(sprite_dir, 0, 0))
+    scheme = ColourScheme(trim_colour="black", tertiary_colour="white")
+
+    project.trim_catch_tolerance = 0
+    untouched = render_layer_frame_preview(project, layer, direction=0, frame=0, scheme=scheme, dither=False)
+    project.trim_catch_tolerance = 2
+    widened = render_layer_frame_preview(project, layer, direction=0, frame=0, scheme=scheme, dither=False)
+
+    assert untouched.getpixel((0, 0))[:3] == (143, 31, 58)  # not caught - kept original
+    assert widened.getpixel((0, 0))[:3] != (143, 31, 58)  # caught - recoloured to the scheme's colour
+
+
+def test_render_layer_frame_uses_project_catch_tolerance(tmp_path):
+    """render_layer_frame (the production path) must read
+    RideProject.trim_catch_tolerance, since dithering is the only place
+    that decides remap-zone classification for the shipped sprite (see
+    build/dither.py's module docstring)."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+    sprite_dir = project.project_dir / layer.sprite_dir
+
+    # Borderline secondary-zone colour (1.86-unit margin) - see
+    # test_dither.py's _BORDERLINE_SECONDARY_RGB for how this was derived.
+    img = Image.new("RGBA", (8, 8), (143, 31, 58, 255))
+    img.save(frame_path(sprite_dir, 0, 0))
+    target_rgb = tuple(load_standard_palette()[SECONDARY_REMAP_START + 3])
+
+    project.trim_catch_tolerance = 0
+    untouched = render_layer_frame(project, layer, direction=0, frame=0, dither=True)
+    project.trim_catch_tolerance = 2
+    widened = render_layer_frame(project, layer, direction=0, frame=0, dither=True)
+
+    assert any(px[:3] != target_rgb for px in untouched.getdata())
+    assert all(px[:3] == target_rgb for px in widened.getdata())
+
+
+def test_render_layer_frame_preview_dither_toggle_still_changes_pixels(tmp_path):
+    """Regression test: render_layer_frame_preview must respect `dither`
+    just like the production path does. remap_preview used to hard-quantize
+    the whole image first, leaving zero residual error for any subsequent
+    dithering pass to diffuse - "Preview dithering" silently became a no-op
+    for every frame once a colour scheme was applied."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+
+    scheme = ColourScheme(trim_colour="black", tertiary_colour="white")
+    without_dither = render_layer_frame_preview(project, layer, direction=0, frame=0, scheme=scheme, dither=False)
+    with_dither = render_layer_frame_preview(project, layer, direction=0, frame=0, scheme=scheme, dither=True)
+
+    assert without_dither.convert("RGB").tobytes() != with_dither.convert("RGB").tobytes()
+
+
 def test_composite_preview_frame_combines_all_layers(tmp_path):
     project = make_multilayer_synthetic_project(tmp_path)
     result = composite_preview_frame(project, direction=0, frame=0)

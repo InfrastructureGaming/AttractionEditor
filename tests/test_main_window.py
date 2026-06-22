@@ -197,6 +197,96 @@ def test_colour_scheme_edit_updates_project(qtbot):
     assert project.colour_schemes[0].tertiary_colour == "black"
 
 
+def test_dither_checkbox_moved_to_colours_section(qtbot):
+    """"Preview dithering" now lives on ColourPreviewPanel - every other
+    preview-rendering panel just reads the same shared widget rather than
+    owning its own (or, for Anchors/Layers, not reading it at all - the
+    bug this test guards against)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.colour_preview_panel.dither_check is not None
+    for panel in (window.animation_player_panel, window.anchor_editor_panel, window.layers_panel):
+        assert panel.dither_check is window.colour_preview_panel.dither_check
+
+
+@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def test_toggling_dither_checkbox_refreshes_animation_preview(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    project = make_tilt_a_whirl_project()
+    window._set_project(project, None)
+
+    before = window.preview_widget.scene.items()
+    window.colour_preview_panel.dither_check.setChecked(True)
+    after = window.preview_widget.scene.items()
+
+    assert before != after or len(after) > 0
+
+
+@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def test_toggling_dither_checkbox_changes_anchor_panels_render(qtbot):
+    """Regression guard: AnchorEditorPanel didn't read the dither checkbox
+    at all before this fix - toggling it had zero visible effect whenever
+    Anchors was the last section to render into the shared preview."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    project = make_tilt_a_whirl_project()
+    window._set_project(project, None)
+
+    window.colour_preview_panel.dither_check.setChecked(False)
+    window.anchor_editor_panel.reload()
+    without_dither = bytes(window.preview_widget.scene.items()[-1].pixmap().toImage().bits())
+
+    window.colour_preview_panel.dither_check.setChecked(True)
+    window.anchor_editor_panel.reload()
+    with_dither = bytes(window.preview_widget.scene.items()[-1].pixmap().toImage().bits())
+
+    assert without_dither != with_dither
+
+
+@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def test_toggling_dither_checkbox_changes_layers_panels_render(qtbot):
+    """Same regression guard as above, for LayersPanel."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    project = make_tilt_a_whirl_project()
+    window._set_project(project, None)
+
+    window.colour_preview_panel.dither_check.setChecked(False)
+    window.layers_panel._reload_preview()
+    without_dither = bytes(window.preview_widget.scene.items()[0].pixmap().toImage().bits())
+
+    window.colour_preview_panel.dither_check.setChecked(True)
+    window.layers_panel._reload_preview()
+    with_dither = bytes(window.preview_widget.scene.items()[0].pixmap().toImage().bits())
+
+    assert without_dither != with_dither
+
+
+@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def test_editing_catch_tolerance_refreshes_every_preview_panel(qtbot):
+    """Trim/Tertiary catch tolerance (RideProject.trim_catch_tolerance/
+    tertiary_catch_tolerance) affects every layer's dithering, not just
+    Colours' own preview - changing it should refresh Layers/Animation/
+    Anchors too, the same way the dither checkbox and active scheme do."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    project = make_tilt_a_whirl_project()
+    window._set_project(project, None)
+
+    before = window.preview_widget.scene.items()
+    window.colour_preview_panel.trim_tolerance_spin.setValue(25)
+    after = window.preview_widget.scene.items()
+
+    assert project.trim_catch_tolerance == 25
+    assert before != after or len(after) > 0
+
+
 @pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
 def test_editing_layers_updates_shared_preview(qtbot):
     """The main functional gain of this pass: LayersPanel had no preview at
@@ -215,6 +305,37 @@ def test_editing_layers_updates_shared_preview(qtbot):
     # The scene was rebuilt (new pixmap item instance), proving LayersPanel
     # actually pushed a fresh render into the shared widget.
     assert before != after or len(after) > 0
+
+
+@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def test_applying_a_colour_scheme_reaches_every_preview_panel(qtbot):
+    """ColourPreviewPanel owns the active-scheme state; Layers/Anchors/
+    Animation must read it through the getter MainWindow wires up, not just
+    Colours' own preview."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    project = make_tilt_a_whirl_project()
+    window._set_project(project, None)
+
+    # Wiring itself: every reader points at the same bound method.
+    for panel in (window.anchor_editor_panel, window.animation_player_panel, window.layers_panel):
+        assert panel._active_scheme_getter == window.colour_preview_panel.get_active_scheme
+
+    assert window.colour_preview_panel.get_active_scheme() is None
+
+    window.colour_preview_panel.scheme_list.setCurrentRow(0)
+    window.colour_preview_panel._on_apply_scheme()
+
+    applied = window.colour_preview_panel.get_active_scheme()
+    assert applied is project.colour_schemes[0]
+    # Every panel's getter resolves to the same now-applied scheme.
+    for panel in (window.anchor_editor_panel, window.animation_player_panel, window.layers_panel):
+        assert panel._active_scheme_getter() is applied
+
+    window.colour_preview_panel._on_disable_colours()
+    for panel in (window.anchor_editor_panel, window.animation_player_panel, window.layers_panel):
+        assert panel._active_scheme_getter() is None
 
 
 @pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")

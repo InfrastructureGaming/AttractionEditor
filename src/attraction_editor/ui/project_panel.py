@@ -63,7 +63,7 @@ class ProjectPanel(QWidget):
         form.addRow("Name", self.name_edit)
         form.addRow("Description", self.description_edit)
         form.addRow("Category", self.category_combo)
-        form.addRow("Frames per direction", self.frames_per_dir_spin)
+        form.addRow("Sequence length (frames)", self.frames_per_dir_spin)
         form.addRow("Sprite width", self.sprite_width_spin)
         form.addRow("Sprite height (negative)", self.sprite_height_negative_spin)
         form.addRow("Sprite height (positive)", self.sprite_height_positive_spin)

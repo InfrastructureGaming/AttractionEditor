@@ -16,6 +16,14 @@ openrct2-cli's IsChangablePixel() behaviour which also excludes that range from
 nearest-colour matching.  Output pixels carry exact StandardPalette RGB values
 so that the subsequent -m closest pass finds exact matches with no residual
 quantisation error.
+
+This is also where RideProject.trim_catch_tolerance/tertiary_catch_tolerance
+actually take effect for the *shipped* sprite (see dither_frame_by_algorithm's
+docstring and _apply_catch_tolerance_bias below). The colour-scheme preview
+(palette/remap.py's remap_preview) has its own, separate classification, but
+the real build never calls that - the secondary/tertiary zone a pixel ends up
+in for the shipped sprite is decided entirely by whichever quantisation pass
+runs here.
 """
 
 from __future__ import annotations
@@ -28,7 +36,11 @@ from PIL import Image
 from attraction_editor.palette.remap import (
     PRIMARY_REMAP_START,
     REMAP_LENGTH,
+    SECONDARY_REMAP_START,
+    TERTIARY_REMAP_START,
+    classify_remap_zone,
     load_standard_palette,
+    pixel_distances_to_palette,
 )
 
 # A colour that no EEVEE-rendered pixel will ever be near, used to fill the
@@ -216,15 +228,72 @@ def dither_frame_atkinson(img: Image.Image, *, strength: int = 32) -> Image.Imag
     return result
 
 
-def dither_frame_by_algorithm(img: Image.Image, algorithm: str, *, strength: int = 32) -> Image.Image:
+def _apply_catch_tolerance_bias(img: Image.Image, trim_tolerance: int, tertiary_tolerance: int) -> Image.Image:
+    """Pre-snap borderline pixels toward (or away from) the secondary/
+    tertiary remap zones before quantising, per RideProject's
+    trim_catch_tolerance/tertiary_catch_tolerance.
+
+    At tolerance=0 for both zones, this is a pure no-op - returns `img`
+    unchanged - so existing dithering output is byte-identical whenever the
+    feature isn't in use. For a nonzero tolerance, only the specific pixels
+    whose zone classification actually *changes* (classify_remap_zone's
+    `caught & ~natural_win`, pulled in by widening, or `natural_win &
+    ~caught`, excluded by narrowing) are touched; pixels that already
+    resolve correctly on their own keep their exact original RGB, so the
+    residual quantisation error they naturally contribute to error-diffusion
+    dithering (Floyd-Steinberg/Atkinson) is undisturbed.
+    """
+    if trim_tolerance == 0 and tertiary_tolerance == 0:
+        return img
+
+    rgba = img.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    rgb_arr = np.array(rgba.convert("RGB"), dtype=np.uint8)
+    h, w = rgb_arr.shape[:2]
+    flat = rgb_arr.reshape(-1, 3).copy()
+
+    dist_sq = pixel_distances_to_palette(rgb_arr)
+    palette = np.array(load_standard_palette(), dtype=np.uint8)
+
+    for zone_start, tolerance in ((SECONDARY_REMAP_START, trim_tolerance), (TERTIARY_REMAP_START, tertiary_tolerance)):
+        if tolerance == 0:
+            continue
+        caught, shade_idx, natural_win, best_other_idx = classify_remap_zone(dist_sq, zone_start, tolerance)
+        pulled_in = caught & ~natural_win
+        pushed_out = natural_win & ~caught
+        flat[pulled_in] = palette[zone_start + shade_idx[pulled_in]]
+        flat[pushed_out] = palette[best_other_idx[pushed_out]]
+
+    result = Image.fromarray(flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
+    result.putalpha(alpha)
+    return result
+
+
+def dither_frame_by_algorithm(
+    img: Image.Image,
+    algorithm: str,
+    *,
+    strength: int = 32,
+    trim_tolerance: int = 0,
+    tertiary_tolerance: int = 0,
+) -> Image.Image:
     """Dispatch to the dithering function named by `algorithm`
-    ("floyd_steinberg" | "bayer" | "atkinson" | "none")."""
-    if algorithm == "floyd_steinberg":
-        return dither_frame(img)
-    if algorithm == "bayer":
-        return dither_frame_bayer(img, strength=strength)
-    if algorithm == "atkinson":
-        return dither_frame_atkinson(img, strength=strength)
+    ("floyd_steinberg" | "bayer" | "atkinson" | "none").
+
+    `trim_tolerance`/`tertiary_tolerance` (see classify_remap_zone) widen or
+    narrow which pixels actually land in the secondary/tertiary remap zones
+    for the three real dithering algorithms - this is the one place that
+    decides classification for the shipped sprite (see this module's
+    docstring). Not applied for "none": the artist's explicit choice to skip
+    quantisation entirely should mean no palette-snapping of any kind."""
     if algorithm == "none":
         return img.convert("RGBA")
+
+    biased = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
+    if algorithm == "floyd_steinberg":
+        return dither_frame(biased)
+    if algorithm == "bayer":
+        return dither_frame_bayer(biased, strength=strength)
+    if algorithm == "atkinson":
+        return dither_frame_atkinson(biased, strength=strength)
     raise ValueError(f"Unknown dither algorithm: {algorithm!r}")

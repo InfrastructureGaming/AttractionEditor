@@ -2,20 +2,24 @@
 structure composite (every Layer dithered/flattened in z-order, see
 build.layers.composite_preview_frame) with rider cars (toggleable per car)
 layered on top. This is the place to actually see whether a layer's chosen
-dithering algorithm jitters in motion - toggle "Preview dithering" while
-playing back.
+dithering algorithm jitters in motion - the "Preview dithering" checkbox
+that controls this now lives on the Colours section (dithering and colour
+remapping are both palette-level concerns best judged together there); this
+panel just reads that same shared checkbox, see set_dither_checkbox().
 
-Deliberately previews with no colour scheme applied (composite_preview_frame's
-default) - this shows exactly what will ship, since the real build never
-recolours either. For previewing a specific default colour scheme, see the
-Colours section (colour_preview_panel.py).
+Shows the session's active colour scheme if one has been applied via the
+Colours section's "Apply Scheme" button (see ColourPreviewPanel); otherwise
+shows the raw, as-shipped structure, since the real build never recolours
+either.
 
 Renders into the shared PreviewWidget (see ui/preview_widget.py) rather than
-its own QLabel - set_preview_widget()/set_direction_combo() must be called
-before set_project()."""
+its own QLabel - set_preview_widget()/set_direction_combo()/
+set_active_scheme_getter()/set_dither_checkbox() must be called before
+set_project()."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
@@ -33,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from attraction_editor.build.layers import composite_preview_frame
-from attraction_editor.model.project import RideProject
+from attraction_editor.model.project import ColourScheme, RideProject
 from attraction_editor.sprites.scanner import frame_path
 from attraction_editor.ui.preview_widget import PreviewWidget
 
@@ -46,6 +50,8 @@ class AnimationPlayerPanel(QWidget):
         self.project: RideProject | None = None
         self.preview_widget: PreviewWidget | None = None
         self.direction_combo: QComboBox | None = None
+        self.dither_check: QCheckBox | None = None
+        self._active_scheme_getter: Callable[[], ColourScheme | None] | None = None
         self.frame_index = 0
         self.car_checks: dict[str, QCheckBox] = {}
 
@@ -59,8 +65,6 @@ class AnimationPlayerPanel(QWidget):
         self.play_button = QPushButton("Play")
         self.play_button.setCheckable(True)
 
-        self.dither_check = QCheckBox("Preview dithering")
-
         self.frame_counter_label = QLabel("Frame 0")
 
         self.car_checks_layout = QVBoxLayout()
@@ -70,7 +74,6 @@ class AnimationPlayerPanel(QWidget):
         form = QFormLayout()
         form.addRow("FPS", self.fps_spin)
         controls.addLayout(form)
-        controls.addWidget(self.dither_check)
         controls.addWidget(self.frame_counter_label)
 
         layout = QVBoxLayout()
@@ -80,7 +83,6 @@ class AnimationPlayerPanel(QWidget):
 
         self.play_button.toggled.connect(self._on_play_toggled)
         self.fps_spin.valueChanged.connect(self._on_fps_changed)
-        self.dither_check.stateChanged.connect(self._update_frame)
 
         self.setEnabled(False)
 
@@ -89,6 +91,17 @@ class AnimationPlayerPanel(QWidget):
 
     def set_direction_combo(self, direction_combo: QComboBox) -> None:
         self.direction_combo = direction_combo
+
+    def set_dither_checkbox(self, dither_check: QCheckBox) -> None:
+        """The "Preview dithering" checkbox now lives on the Colours
+        section (ColourPreviewPanel) - this panel just reads/disables the
+        same shared widget rather than owning its own."""
+        self.dither_check = dither_check
+
+    def set_active_scheme_getter(self, getter: Callable[[], ColourScheme | None]) -> None:
+        """`getter` returns the session's currently-applied colour scheme
+        (see ColourPreviewPanel.get_active_scheme), or None for raw sprites."""
+        self._active_scheme_getter = getter
 
     def set_project(self, project: RideProject) -> None:
         self.project = project
@@ -119,11 +132,13 @@ class AnimationPlayerPanel(QWidget):
         if checked:
             self.timer.start(1000 // self.fps_spin.value())
             self.play_button.setText("Pause")
-            self.dither_check.setEnabled(False)
+            if self.dither_check is not None:
+                self.dither_check.setEnabled(False)
         else:
             self.timer.stop()
             self.play_button.setText("Play")
-            self.dither_check.setEnabled(True)
+            if self.dither_check is not None:
+                self.dither_check.setEnabled(True)
             self._update_frame()
 
     def _on_fps_changed(self, value: int) -> None:
@@ -145,10 +160,12 @@ class AnimationPlayerPanel(QWidget):
 
         direction = self.direction_combo.currentIndex()
         project_dir = Path(self.project.project_dir)
+        scheme = self._active_scheme_getter() if self._active_scheme_getter else None
+        dither = self.dither_check.isChecked() if self.dither_check is not None else False
 
         try:
             composite = composite_preview_frame(
-                self.project, direction, self.frame_index, dither=self.dither_check.isChecked()
+                self.project, direction, self.frame_index, dither=dither, scheme=scheme
             )
         except FileNotFoundError as exc:
             self.frame_counter_label.setText(f"Frame {self.frame_index} - preview unavailable ({exc})")

@@ -205,3 +205,39 @@ def test_rideproject_requires_at_least_one_colour_scheme(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     with pytest.raises(ValueError, match="at least one colour scheme"):
         RideProject(**{**vars(project), "colour_schemes": []})
+
+
+def test_catch_tolerance_defaults_to_zero(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.trim_catch_tolerance == 0
+    assert project.tertiary_catch_tolerance == 0
+
+
+def test_catch_tolerance_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.trim_catch_tolerance = 12
+    project.tertiary_catch_tolerance = -8
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    loaded = type(project).load(path)
+
+    assert loaded.trim_catch_tolerance == 12
+    assert loaded.tertiary_catch_tolerance == -8
+
+
+def test_load_back_compat_for_projects_without_catch_tolerance(tmp_path: Path):
+    """An old project file saved before this feature existed has no
+    trim_catch_tolerance/tertiary_catch_tolerance keys at all - must load
+    with the default (0, today's original fixed behaviour), not error."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data.pop("trim_catch_tolerance")
+    data.pop("tertiary_catch_tolerance")
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.trim_catch_tolerance == 0
+    assert loaded.tertiary_catch_tolerance == 0

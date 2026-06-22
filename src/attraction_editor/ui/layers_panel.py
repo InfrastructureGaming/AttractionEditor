@@ -17,10 +17,12 @@ be called before set_project()."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -37,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from attraction_editor.build.layers import composite_preview_frame
-from attraction_editor.model.project import CarConfig, DITHER_ALGORITHMS, LAYER_KINDS, Layer, RideProject
+from attraction_editor.model.project import CarConfig, ColourScheme, DITHER_ALGORITHMS, LAYER_KINDS, Layer, RideProject
 from attraction_editor.ui.preview_widget import PreviewWidget
 
 # Display order for the kind/algorithm combos - sets are unordered, so pin
@@ -62,6 +64,8 @@ class LayersPanel(QWidget):
         self.project: RideProject | None = None
         self.preview_widget: PreviewWidget | None = None
         self.direction_combo: QComboBox | None = None
+        self.dither_check: QCheckBox | None = None
+        self._active_scheme_getter: Callable[[], ColourScheme | None] | None = None
         self._loading = False
 
         self.layer_list = QListWidget()
@@ -153,6 +157,16 @@ class LayersPanel(QWidget):
     def set_direction_combo(self, direction_combo: QComboBox) -> None:
         self.direction_combo = direction_combo
 
+    def set_active_scheme_getter(self, getter: Callable[[], ColourScheme | None]) -> None:
+        """`getter` returns the session's currently-applied colour scheme
+        (see ColourPreviewPanel.get_active_scheme), or None for raw sprites."""
+        self._active_scheme_getter = getter
+
+    def set_dither_checkbox(self, dither_check: QCheckBox) -> None:
+        """The "Preview dithering" checkbox lives on the Colours section
+        (ColourPreviewPanel) - this panel just reads the same shared widget."""
+        self.dither_check = dither_check
+
     def set_project(self, project: RideProject) -> None:
         self.project = project
         self._reload_layer_list()
@@ -169,8 +183,10 @@ class LayersPanel(QWidget):
         ):
             return
         direction = self.direction_combo.currentIndex()
+        scheme = self._active_scheme_getter() if self._active_scheme_getter else None
+        dither = self.dither_check.isChecked() if self.dither_check is not None else False
         try:
-            preview = composite_preview_frame(self.project, direction)
+            preview = composite_preview_frame(self.project, direction, dither=dither, scheme=scheme)
         except FileNotFoundError as exc:
             self.status_label.setText(f"Preview unavailable - {exc}")
             return

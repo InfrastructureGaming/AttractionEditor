@@ -65,7 +65,17 @@ def render_layer_frame(
         return cache[cache_key]
 
     img = _load_layer_source(project, layer, direction, frame)
-    result = dither_frame_by_algorithm(img, layer.dither_algorithm, strength=layer.dither_strength) if dither else img.convert("RGBA")
+    result = (
+        dither_frame_by_algorithm(
+            img,
+            layer.dither_algorithm,
+            strength=layer.dither_strength,
+            trim_tolerance=project.trim_catch_tolerance,
+            tertiary_tolerance=project.tertiary_catch_tolerance,
+        )
+        if dither
+        else img.convert("RGBA")
+    )
 
     if cache is not None and cache_key is not None:
         cache[cache_key] = result
@@ -86,14 +96,28 @@ def render_layer_frame_preview(
     trim/tertiary colours via remap_preview before dithering, so the UI can
     show what a given default colour scheme would look like. Never used by
     the real build path - the result of this is never written to disk as a
-    shipped sprite."""
+    shipped sprite.
+
+    remap_preview already classifies pixels using project's catch tolerances
+    (so this preview matches what the real build will catch); the
+    dithering step that follows is passed tolerance=0 (its default) since
+    there's nothing left for it to (re)classify - every pixel remap_preview
+    decided to catch has already been recoloured to the scheme's colour,
+    not the raw reference shade dither_frame_by_algorithm's bias looks for.
+    """
     is_static = layer.kind == "static"
     cache_key = (layer.sprite_dir, direction, scheme.trim_colour, scheme.tertiary_colour) if is_static else None
     if cache is not None and cache_key is not None and cache_key in cache:
         return cache[cache_key]
 
     img = _load_layer_source(project, layer, direction, frame)
-    remapped = remap_preview(img, scheme.trim_colour, scheme.tertiary_colour)
+    remapped = remap_preview(
+        img,
+        scheme.trim_colour,
+        scheme.tertiary_colour,
+        trim_tolerance=project.trim_catch_tolerance,
+        tertiary_tolerance=project.tertiary_catch_tolerance,
+    )
     result = dither_frame_by_algorithm(remapped, layer.dither_algorithm, strength=layer.dither_strength) if dither else remapped
 
     if cache is not None and cache_key is not None:

@@ -10,7 +10,15 @@ and share one "Direction" combo owned by this window, instead of each having
 their own. ProgramEditorPanel's transition-comparison thumbnails and
 SpriteBrowserPanel's sample-frame grid stay as their own small embedded
 displays - they show multiple images at once, which doesn't fit the single
-shared preview surface."""
+shared preview surface.
+
+The Colours section also owns a session-only "active preview scheme" (Apply
+Scheme / Disable Colours buttons) - the other three preview-rendering panels
+read it via set_active_scheme_getter(), so applying a scheme is reflected
+everywhere, not just on the Colours section's own preview. This is purely
+a UI convenience for *looking at* the ride in colour while editing other
+sections; it's never written to the project and never affects what the real
+build produces (build/layers.py's production render path is unaffected)."""
 
 from __future__ import annotations
 
@@ -74,7 +82,22 @@ class MainWindow(QMainWindow):
             panel.set_preview_widget(self.preview_widget)
             panel.set_direction_combo(self.direction_combo)
 
+        # The Colours section owns the session's "active preview scheme"
+        # state (Apply Scheme / Disable Colours) - the other three panels
+        # just read it via this getter when they render.
+        for panel in (self.anchor_editor_panel, self.animation_player_panel, self.layers_panel):
+            panel.set_active_scheme_getter(self.colour_preview_panel.get_active_scheme)
+
+        # "Preview dithering" also moved onto the Colours section - every
+        # panel just reads/disables the same shared checkbox now, the same
+        # way they all read direction_combo.
+        for panel in (self.anchor_editor_panel, self.animation_player_panel, self.layers_panel):
+            panel.set_dither_checkbox(self.colour_preview_panel.dither_check)
+        self.colour_preview_panel.dither_check.stateChanged.connect(self._on_dither_check_changed)
+
         self.direction_combo.currentIndexChanged.connect(self._on_direction_changed)
+        self.colour_preview_panel.activeSchemeChanged.connect(self._on_active_scheme_changed)
+        self.colour_preview_panel.catchToleranceChanged.connect(self._on_catch_tolerance_changed)
 
         preview_side = QWidget()
         preview_layout = QVBoxLayout()
@@ -169,6 +192,34 @@ class MainWindow(QMainWindow):
         # scene, deleting any previously-added overlay), so it must always
         # refresh last or its crosshair gets deleted by a later call here.
         self.colour_preview_panel._reload_preview()
+        self.animation_player_panel._update_frame()
+        self.layers_panel._reload_preview()
+        self.anchor_editor_panel.reload()
+
+    def _on_active_scheme_changed(self) -> None:
+        # Apply Scheme / Disable Colours changed the session's active
+        # preview scheme - every section reading it via
+        # set_active_scheme_getter() needs to re-render. Anchor last, same
+        # reason as _on_direction_changed above.
+        self.animation_player_panel._update_frame()
+        self.layers_panel._reload_preview()
+        self.anchor_editor_panel.reload()
+
+    def _on_dither_check_changed(self, *_args) -> None:
+        # ColourPreviewPanel refreshes its own preview internally (connected
+        # in its own __init__) - this handles every *other* panel reading
+        # the same shared checkbox via set_dither_checkbox(). Anchor last,
+        # same reason as _on_direction_changed above.
+        self.animation_player_panel._update_frame()
+        self.layers_panel._reload_preview()
+        self.anchor_editor_panel.reload()
+
+    def _on_catch_tolerance_changed(self) -> None:
+        # Trim/Tertiary catch tolerance changed RideProject.trim_catch_
+        # tolerance/tertiary_catch_tolerance, which affects every layer's
+        # dithering (see build/dither.py) - ColourPreviewPanel already
+        # refreshed its own preview before emitting; this handles the rest.
+        # Anchor last, same reason as _on_direction_changed above.
         self.animation_player_panel._update_frame()
         self.layers_panel._reload_preview()
         self.anchor_editor_panel.reload()
