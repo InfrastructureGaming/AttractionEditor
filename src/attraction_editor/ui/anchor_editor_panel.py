@@ -4,31 +4,29 @@ frame, bound to RideProject.anchors[direction].
 A DirectionAnchor (x, y) is the offset from the sprite's origin point to the
 image's top-left corner (the sprite_manifest.json / G1 xOffset/yOffset
 convention), so the origin point itself sits at image pixel (-x, -y).
-"""
+
+Renders into the shared PreviewWidget (see ui/preview_widget.py) rather than
+owning its own QGraphicsView - set_preview_widget()/set_direction_combo() must
+be called before set_project()."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from PIL import Image
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGraphicsEllipseItem,
     QGraphicsItem,
-    QGraphicsScene,
-    QGraphicsView,
-    QHBoxLayout,
+    QLabel,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from attraction_editor.model.project import DIRECTIONS, DirectionAnchor, RideProject
-from attraction_editor.sprites.scanner import frame_path
-from attraction_editor.ui.pil_qt import pil_to_pixmap
+from attraction_editor.build.layers import composite_preview_frame
+from attraction_editor.model.project import DirectionAnchor, RideProject
+from attraction_editor.ui.preview_widget import PreviewWidget
 
 CROSSHAIR_RADIUS = 5
 
@@ -64,37 +62,37 @@ class AnchorEditorPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.project: RideProject | None = None
+        self.preview_widget: PreviewWidget | None = None
+        self.direction_combo: QComboBox | None = None
         self._updating = False
-
-        self.direction_combo = QComboBox()
-        self.direction_combo.addItems([f"Direction {d}" for d in range(DIRECTIONS)])
 
         self.x_spin = QSpinBox()
         self.x_spin.setRange(-2000, 2000)
         self.y_spin = QSpinBox()
         self.y_spin.setRange(-2000, 2000)
 
-        self.scene = QGraphicsScene()
-        self.view = QGraphicsView(self.scene)
-
         form = QFormLayout()
         form.addRow("Origin X", self.x_spin)
         form.addRow("Origin Y", self.y_spin)
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.direction_combo)
-        controls.addLayout(form)
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
 
         layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.view)
+        layout.addLayout(form)
+        layout.addWidget(self.status_label)
         self.setLayout(layout)
 
-        self.direction_combo.currentIndexChanged.connect(self.reload)
         self.x_spin.valueChanged.connect(self._on_spin_changed)
         self.y_spin.valueChanged.connect(self._on_spin_changed)
 
         self.setEnabled(False)
+
+    def set_preview_widget(self, preview_widget: PreviewWidget) -> None:
+        self.preview_widget = preview_widget
+
+    def set_direction_combo(self, direction_combo: QComboBox) -> None:
+        self.direction_combo = direction_combo
 
     def set_project(self, project: RideProject) -> None:
         self.project = project
@@ -102,23 +100,26 @@ class AnchorEditorPanel(QWidget):
         self.reload()
 
     def reload(self, *_args) -> None:
-        if self.project is None or self.project.project_dir is None:
+        if self.project is None or self.project.project_dir is None or self.preview_widget is None:
             return
 
         direction = self.direction_combo.currentIndex()
-        core_dir = Path(self.project.project_dir) / self.project.core_sprite_dir
-        path = frame_path(core_dir, direction, 0)
 
-        self.scene.clear()
-        if path.exists():
-            with Image.open(path) as img:
-                pixmap = pil_to_pixmap(img)
-            self.scene.addPixmap(pixmap)
-            self.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
-            self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        try:
+            composite = composite_preview_frame(self.project, direction)
+        except FileNotFoundError as exc:
+            composite = None
+            self.status_label.setText(f"Preview unavailable - {exc}")
+        else:
+            self.status_label.setText("")
+
+        if composite is not None:
+            self.preview_widget.set_image(composite)
+        else:
+            self.preview_widget.clear()
 
         self.crosshair = _CrosshairItem(self._on_crosshair_moved)
-        self.scene.addItem(self.crosshair)
+        self.preview_widget.add_overlay_item(self.crosshair)
 
         anchor = self.project.anchors[direction]
         x, y = anchor_to_origin(anchor)

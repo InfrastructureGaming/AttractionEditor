@@ -1,6 +1,6 @@
 """Programs & Phases editor: authors RideProject.programs (AnimationProgram /
-AnimationPhase), the multi-phase/multi-program animation graph consumed by
-build/handoff.py's generate_animation_program_cpp().
+AnimationPhase), the multi-phase/multi-program animation graph written into
+object.json's flatRideAnimation block on build (see build/object_json.py).
 
 Includes a transition-continuity preview - the last frame of the selected
 phase next to the first frame of its next_phase - so the animator can confirm
@@ -8,9 +8,6 @@ the two line up before handoff."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from PIL import Image
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,8 +24,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from attraction_editor.build.layers import composite_preview_frame
 from attraction_editor.model.project import AnimationPhase, AnimationProgram, RideProject
-from attraction_editor.sprites.scanner import frame_path
 from attraction_editor.ui.pil_qt import pil_to_pixmap
 
 PREVIEW_WIDTH = 160
@@ -114,12 +111,13 @@ class ProgramEditorPanel(QWidget):
         preview_layout.addLayout(preview_images)
         preview_box.setLayout(preview_layout)
 
-        columns = QHBoxLayout()
-        columns.addWidget(program_box)
-        columns.addWidget(phase_box)
-
+        # Stacked rather than side-by-side: this panel now lives in a narrow
+        # column next to the shared preview (see ui/main_window.py), not a
+        # full-width tab - a QHBoxLayout here would sum both boxes' minimum
+        # widths and force horizontal scrolling as the column narrows.
         layout = QVBoxLayout()
-        layout.addLayout(columns)
+        layout.addWidget(program_box)
+        layout.addWidget(phase_box)
         layout.addWidget(preview_box)
         self.setLayout(layout)
 
@@ -332,28 +330,26 @@ class ProgramEditorPanel(QWidget):
         if program is None or phase is None or phase.frame_count <= 0:
             return
 
-        core_dir = Path(self.project.project_dir) / self.project.core_sprite_dir
         last_frame = phase.frame_start + phase.frame_count - 1
-        self._set_preview(self.preview_last_label, core_dir, last_frame, f"Last frame ({last_frame})")
+        self._set_preview(self.preview_last_label, last_frame, f"Last frame ({last_frame})")
 
         if 0 <= phase.next_phase < len(program.phases):
             next_phase = program.phases[phase.next_phase]
             first_frame = next_phase.frame_start
             self._set_preview(
                 self.preview_first_label,
-                core_dir,
                 first_frame,
                 f"{next_phase.name!r} first frame ({first_frame})",
             )
 
-    def _set_preview(self, label: QLabel, core_dir: Path, frame: int, caption: str) -> None:
-        path = frame_path(core_dir, 0, frame)
-        if not path.exists():
-            label.setText(f"{caption}\n(not found: {path.name})")
+    def _set_preview(self, label: QLabel, frame: int, caption: str) -> None:
+        try:
+            composite = composite_preview_frame(self.project, 0, frame)
+        except FileNotFoundError:
+            label.setText(f"{caption}\n(frame not found)")
             return
 
-        with Image.open(path) as img:
-            pixmap = pil_to_pixmap(img)
+        pixmap = pil_to_pixmap(composite)
         if pixmap.width() > PREVIEW_WIDTH:
             pixmap = pixmap.scaledToWidth(PREVIEW_WIDTH, Qt.TransformationMode.SmoothTransformation)
         label.setPixmap(pixmap)

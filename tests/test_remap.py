@@ -39,7 +39,7 @@ def test_remap_preview_recolours_secondary_and_tertiary_pixels():
     img.putpixel((0, 0), (*palette[secondary_index], 255))
     img.putpixel((1, 0), (*palette[tertiary_index], 255))
 
-    result = remap_preview(img, body_colour="black", trim_colour="white")
+    result = remap_preview(img, trim_colour="black", tertiary_colour="white")
 
     expected_secondary = tuple(palette[ramps["black"][3]])
     expected_tertiary = tuple(palette[ramps["white"][3]])
@@ -53,7 +53,7 @@ def test_remap_preview_preserves_alpha():
     img.putpixel((0, 0), (255, 255, 255, 0))
     img.putpixel((1, 0), (255, 255, 255, 255))
 
-    result = remap_preview(img, body_colour="black", trim_colour="white")
+    result = remap_preview(img, trim_colour="black", tertiary_colour="white")
 
     assert result.getpixel((0, 0))[3] == 0
     assert result.getpixel((1, 0))[3] == 255
@@ -62,11 +62,12 @@ def test_remap_preview_preserves_alpha():
 @pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
 def test_remap_preview_tilt_a_whirl_core_frame():
     project = make_tilt_a_whirl_project()
-    core_dir = project.project_dir / project.core_sprite_dir
+    core_dir = project.project_dir / project.layers[0].sprite_dir
 
+    scheme = project.colour_schemes[0]
     with Image.open(frame_path(core_dir, 0, 0)) as img:
         source = img.convert("RGBA")
-        result = remap_preview(source, project.body_colour, project.trim_colour)
+        result = remap_preview(source, scheme.trim_colour, scheme.tertiary_colour)
 
     assert result.mode == "RGBA"
     assert result.size == source.size

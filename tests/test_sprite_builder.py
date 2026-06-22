@@ -26,7 +26,8 @@ def test_write_manifest(tmp_path):
 
     assert manifest_path == tmp_path / "sprite_manifest.json"
     written = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert written == build_manifest(project)
+    structure_frame_dir = project.project_dir / project.layers[0].sprite_dir
+    assert written == build_manifest(project, structure_frame_dir)
 
 
 def test_read_images_dat_header(tmp_path):

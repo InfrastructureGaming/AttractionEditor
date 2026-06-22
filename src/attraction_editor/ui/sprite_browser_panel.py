@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from attraction_editor.model.project import RideProject
-from attraction_editor.sprites.scanner import frame_path
+from attraction_editor.model.project import Layer, RideProject
+from attraction_editor.sprites.scanner import frame_path, static_frame_path
 from attraction_editor.sprites.validate import SAMPLE_FRAMES, FrameSetReport, validate_project
 from attraction_editor.ui.pil_qt import pil_to_pixmap
 
@@ -85,11 +85,20 @@ class SpriteBrowserPanel(QWidget):
     def _frame_set_names(self) -> list[str]:
         if self.project is None:
             return []
-        return ["Core"] + [car.name for car in self.project.cars]
+        return [layer.name for layer in self.project.layers] + [car.name for car in self.project.cars]
+
+    def _layer_for(self, name: str) -> Layer | None:
+        if self.project is None:
+            return None
+        for layer in self.project.layers:
+            if layer.name == name:
+                return layer
+        return None
 
     def _sprite_dir_for(self, name: str) -> str:
-        if name == "Core":
-            return self.project.core_sprite_dir
+        layer = self._layer_for(name)
+        if layer is not None:
+            return layer.sprite_dir
         for car in self.project.cars:
             if car.name == name:
                 return car.sprite_dir
@@ -142,8 +151,20 @@ class SpriteBrowserPanel(QWidget):
 
         sprite_dir = Path(self.project.project_dir) / self._sprite_dir_for(names[row])
         direction = self.direction_combo.currentIndex()
-        samples = [f for f in SAMPLE_FRAMES if f < self.project.frames_per_dir]
+        layer = self._layer_for(names[row])
 
+        if layer is not None and layer.kind == "static":
+            # A static layer has exactly one frame per direction - nothing to sample.
+            path = static_frame_path(sprite_dir, direction)
+            if path.exists():
+                with Image.open(path) as img:
+                    thumb = img.copy()
+                thumb.thumbnail((THUMBNAIL_SIZE, THUMBNAIL_SIZE))
+                icon = QIcon(pil_to_pixmap(thumb))
+                self.thumbnail_list.addItem(QListWidgetItem(icon, "static"))
+            return
+
+        samples = [f for f in SAMPLE_FRAMES if f < self.project.frames_per_dir]
         for frame in samples:
             path = frame_path(sprite_dir, direction, frame)
             if not path.exists():

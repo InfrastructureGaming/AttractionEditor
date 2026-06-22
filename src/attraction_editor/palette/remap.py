@@ -5,7 +5,23 @@ Mirrors GfxDrawSpriteGetPalette's secondary/tertiary remap (see
 feedback_sprite_packaging.md): a frame's pixels are matched to the nearest
 StandardPalette entry (as `-m closest` does), then any pixel landing in the
 secondary (202-213) or tertiary (46-57) remap ranges is replaced according to
-the chosen body/trim Colour's 12-shade ramp.
+the chosen Trim/Tertiary Colour's 12-shade ramp.
+
+Field naming matches the engine's actual VehicleColour terminology (verified
+against VehiclePaint.cpp/ImageId.hpp/PaletteIndex.h): Trim drives the
+secondary zone (202-213, reference shade "bright_pink"), Tertiary drives the
+tertiary zone (46-57, reference shade "yellow"). There's no Body/primary
+parameter for the same reason `primary_colour` below is noted as
+build-irrelevant: openrct2-cli's `-m closest` excludes the primary zone
+(243-254) from its nearest-match targets entirely (ImageImporter.cpp's
+IsChangablePixel), so no PNG-authored pixel can ever land there.
+
+IMPORTANT: this function is preview-only. The real sprite-build pipeline
+(build/layers.py's render_layer_frame, used by build_composite_frames) must
+NOT call this - baking a specific colour into the shipped sprite would erase
+the secondary/tertiary zone pixels the engine needs to recolour the ride live
+at render time. Only call this from UI preview code or when generating
+object.json's properties.carColours default-scheme list.
 """
 
 from __future__ import annotations
@@ -53,11 +69,11 @@ def colour_swatch_rgb(colour: str) -> tuple[int, int, int]:
     return (r, g, b)
 
 
-def remap_preview(image: Image.Image, body_colour: str, trim_colour: str, primary_colour: str | None = None) -> Image.Image:
+def remap_preview(image: Image.Image, trim_colour: str, tertiary_colour: str, body_colour: str | None = None) -> Image.Image:
     """Return an RGBA copy of `image` with its secondary/tertiary remap-range
-    pixels recoloured according to `body_colour`/`trim_colour`.
+    pixels recoloured according to `trim_colour`/`tertiary_colour`.
 
-    `primary_colour`, if given, also remaps the primary range (243-254) -
+    `body_colour`, if given, also remaps the primary range (243-254) -
     included for completeness even though no pixel from a `-m closest`
     Blender render can land there in practice.
     """
@@ -69,11 +85,11 @@ def remap_preview(image: Image.Image, body_colour: str, trim_colour: str, primar
     ramps = load_colour_ramps()
     lut = list(range(256))
     for i in range(REMAP_LENGTH):
-        lut[SECONDARY_REMAP_START + i] = ramps[body_colour][i]
-        lut[TERTIARY_REMAP_START + i] = ramps[trim_colour][i]
-    if primary_colour is not None:
+        lut[SECONDARY_REMAP_START + i] = ramps[trim_colour][i]
+        lut[TERTIARY_REMAP_START + i] = ramps[tertiary_colour][i]
+    if body_colour is not None:
         for i in range(REMAP_LENGTH):
-            lut[PRIMARY_REMAP_START + i] = ramps[primary_colour][i]
+            lut[PRIMARY_REMAP_START + i] = ramps[body_colour][i]
 
     remapped = indexed.point(lut)
     remapped.putpalette([component for rgb in load_standard_palette() for component in rgb])

@@ -1,5 +1,5 @@
-"""Build & Package pipeline (Phase 4) driven from a single button, with a
-streamed log and the RTD handoff report."""
+"""Build & Package pipeline driven from a single button, with a streamed log
+and a build summary (flatRideAnimation values, image count, anchor positions)."""
 
 from __future__ import annotations
 
@@ -33,11 +33,20 @@ class _BuildWorker(QObject):
                 self.finished.emit(False, "Validation found errors - see log above")
                 return
 
+            self.log.emit("Compositing layers (remap + per-layer dithering)...")
+            last_pct = [-1]
+
+            def on_dither_progress(done: int, total: int) -> None:
+                pct = (done * 100) // total
+                if pct != last_pct[0] and pct % 5 == 0:
+                    self.log.emit(f"  Compositing: {done}/{total} frames ({pct}%)")
+                    last_pct[0] = pct
+
             self.log.emit("Building images.dat via openrct2-cli (this may take a while)...")
-            result = build_images_dat(self.project)
+            result = build_images_dat(self.project, dither=True, on_progress=on_dither_progress)
             self.log.emit(f"  {result.image_count} images, {result.total_data_size} bytes total")
 
-            self.log.emit("Updating object.json...")
+            self.log.emit("Updating object.json (images range + flatRideAnimation)...")
             update_object_json(self.project)
 
             self.log.emit("Packaging .parkobj...")
@@ -62,7 +71,7 @@ class BuildPanel(QWidget):
         self._worker: _BuildWorker | None = None
 
         self.build_button = QPushButton("Build and Package")
-        self.handoff_button = QPushButton("Generate handoff report")
+        self.handoff_button = QPushButton("View build summary")
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)

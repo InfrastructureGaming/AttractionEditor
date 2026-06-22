@@ -1,22 +1,50 @@
-"""Top-level window: tabbed panels over a single bound RideProject, plus
-File menu actions for creating/opening/saving `.ridepkg.json` project files."""
+"""Top-level window: every section stacked in one scrollable column next to
+a shared live preview, plus File menu actions for creating/opening/saving
+`.ridepkg.json` project files.
+
+No tabs - tab-switching to check the effect of an edit became disruptive as
+the feature set grew (layers, dithering, colour schemes all want to be seen
+immediately). AnchorEditorPanel/ColourPreviewPanel/AnimationPlayerPanel/
+LayersPanel all render into one shared PreviewWidget (see ui/preview_widget.py)
+and share one "Direction" combo owned by this window, instead of each having
+their own. ProgramEditorPanel's transition-comparison thumbnails and
+SpriteBrowserPanel's sample-frame grid stay as their own small embedded
+displays - they show multiple images at once, which doesn't fit the single
+shared preview surface."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QTabWidget
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QMainWindow,
+    QMessageBox,
+    QScrollArea,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
 
-from attraction_editor.model.project import DIRECTIONS, DirectionAnchor, RideProject
+from attraction_editor.model.project import DIRECTIONS, DirectionAnchor, Layer, RideProject
 from attraction_editor.ui.anchor_editor_panel import AnchorEditorPanel
 from attraction_editor.ui.animation_player_panel import AnimationPlayerPanel
 from attraction_editor.ui.build_panel import BuildPanel
+from attraction_editor.ui.collapsible_section import CollapsibleSection
 from attraction_editor.ui.colour_preview_panel import ColourPreviewPanel
+from attraction_editor.ui.layers_panel import LayersPanel
+from attraction_editor.ui.preview_widget import PreviewWidget
 from attraction_editor.ui.program_editor_panel import ProgramEditorPanel
 from attraction_editor.ui.project_panel import ProjectPanel
 from attraction_editor.ui.sprite_browser_panel import SpriteBrowserPanel
 
 PROJECT_FILE_FILTER = "Ride project (*.ridepkg.json);;All files (*)"
+
+
+def _wrap_in_group(title: str, widget: QWidget, *, expanded: bool = False) -> CollapsibleSection:
+    return CollapsibleSection(title, widget, expanded=expanded)
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +56,7 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
 
         self.project_panel = ProjectPanel()
+        self.layers_panel = LayersPanel()
         self.sprite_browser_panel = SpriteBrowserPanel()
         self.anchor_editor_panel = AnchorEditorPanel()
         self.colour_preview_panel = ColourPreviewPanel()
@@ -35,20 +64,94 @@ class MainWindow(QMainWindow):
         self.program_editor_panel = ProgramEditorPanel()
         self.build_panel = BuildPanel()
 
-        tabs = QTabWidget()
-        tabs.addTab(self.project_panel, "Project")
-        tabs.addTab(self.sprite_browser_panel, "Sprites")
-        tabs.addTab(self.anchor_editor_panel, "Anchors")
-        tabs.addTab(self.colour_preview_panel, "Colours")
-        tabs.addTab(self.animation_player_panel, "Animation")
-        tabs.addTab(self.program_editor_panel, "Programs & Phases")
-        tabs.addTab(self.build_panel, "Build")
-        self.setCentralWidget(tabs)
+        # Shared preview surface + the one "Direction" selector every
+        # preview-rendering section reads from, instead of each owning its own.
+        self.preview_widget = PreviewWidget()
+        self.direction_combo = QComboBox()
+        self.direction_combo.addItems([f"Direction {d}" for d in range(DIRECTIONS)])
+
+        for panel in (self.anchor_editor_panel, self.colour_preview_panel, self.animation_player_panel, self.layers_panel):
+            panel.set_preview_widget(self.preview_widget)
+            panel.set_direction_combo(self.direction_combo)
+
+        self.direction_combo.currentIndexChanged.connect(self._on_direction_changed)
+
+        preview_side = QWidget()
+        preview_layout = QVBoxLayout()
+        preview_layout.addWidget(self.direction_combo)
+        preview_layout.addWidget(self.preview_widget)
+        preview_side.setLayout(preview_layout)
+
+        controls_column = QVBoxLayout()
+        controls_column.addWidget(_wrap_in_group("Project", self.project_panel, expanded=True))
+        controls_column.addWidget(_wrap_in_group("Layers", self.layers_panel))
+        controls_column.addWidget(_wrap_in_group("Sprites", self.sprite_browser_panel))
+        controls_column.addWidget(_wrap_in_group("Anchors", self.anchor_editor_panel))
+        controls_column.addWidget(_wrap_in_group("Colours", self.colour_preview_panel))
+        controls_column.addWidget(_wrap_in_group("Animation", self.animation_player_panel))
+        controls_column.addWidget(_wrap_in_group("Programs & Phases", self.program_editor_panel))
+        controls_column.addWidget(_wrap_in_group("Build", self.build_panel))
+        # Without this, QVBoxLayout distributes leftover vertical space among
+        # the sections themselves once they're collapsed (each stretches to
+        # fill the gap) instead of staying packed at the top - the stretch
+        # absorbs that space instead.
+        controls_column.addStretch()
+
+        controls_content = QWidget()
+        controls_content.setLayout(controls_column)
+
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidget(controls_content)
+        controls_scroll.setWidgetResizable(True)
+
+        # QScrollArea.minimumSizeHint() deliberately ignores its content's
+        # size (it's designed to handle overflow via scrollbars), so a
+        # QSplitter will happily shrink it well past the point where its
+        # content needs to scroll horizontally - dragging the divider would
+        # otherwise force exactly the horizontal scrolling we don't want.
+        # Pin an explicit floor instead, computed from the content's actual
+        # minimum width, so the divider simply can't be dragged that far.
+        scrollbar_allowance = controls_scroll.verticalScrollBar().sizeHint().width() + 4
+        controls_scroll.setMinimumWidth(controls_content.minimumSizeHint().width() + scrollbar_allowance)
+
+        self.splitter = QSplitter()
+        self.splitter.addWidget(preview_side)
+        self.splitter.addWidget(controls_scroll)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
+        self.setCentralWidget(self.splitter)
+        self._splitter_initialized = False
 
         self._build_menu()
 
         self.project_panel.projectChanged.connect(self._on_project_panel_changed)
-        self.colour_preview_panel.projectChanged.connect(self.project_panel.refresh_colours_from_project)
+        self.layers_panel.projectChanged.connect(self._on_layers_panel_changed)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().showEvent(event)
+        if not self._splitter_initialized:
+            self._splitter_initialized = True
+            # Calling setSizes() in __init__ doesn't work - the window has no
+            # real width yet then. Even here, in showEvent, Qt's own internal
+            # layout pass for the freshly-shown splitter runs *after* this
+            # handler and overwrites it - deferring to the next event loop
+            # iteration (0ms timer) lets that settle first.
+            #
+            # Equal *small* values (e.g. [1, 1]) don't reliably scale into a
+            # 50/50 proportional split here - empirically, Qt instead falls
+            # back to each pane's own size hint and distributes only the
+            # leftover by stretch factor, which is not 50/50 when the two
+            # panes' natural size hints differ (they do: the preview side is
+            # much narrower than the controls column). Computing the actual
+            # half-width explicitly is what reliably works.
+            #
+            # Guarded by the flag above so later minimize/restore cycles
+            # don't reset a user's own drag.
+            QTimer.singleShot(0, self._apply_default_splitter_split)
+
+    def _apply_default_splitter_split(self) -> None:
+        half = self.splitter.width() // 2
+        self.splitter.setSizes([half, half])
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -59,24 +162,49 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction("E&xit", self.close)
 
+    def _on_direction_changed(self, *_args) -> None:
+        # "Last writer wins" on the shared preview - re-trigger every section
+        # that renders into it. AnchorEditorPanel's crosshair is the only
+        # *stateful* overlay item among them (set_image() wipes the whole
+        # scene, deleting any previously-added overlay), so it must always
+        # refresh last or its crosshair gets deleted by a later call here.
+        self.colour_preview_panel._reload_preview()
+        self.animation_player_panel._update_frame()
+        self.layers_panel._reload_preview()
+        self.anchor_editor_panel.reload()
+
     def _on_project_panel_changed(self) -> None:
         self.colour_preview_panel.refresh_from_project()
         self.sprite_browser_panel._reload_frame_set_list()
+        self.animation_player_panel._update_frame()
         self.anchor_editor_panel.reload()
+
+    def _on_layers_panel_changed(self) -> None:
+        # Layer order/content/dithering choice (and rider-car list changes,
+        # which also live on this panel) all feed the composite, which every
+        # other preview panel renders from - refresh them all. Anchor last -
+        # see _on_direction_changed's comment on why.
+        self.sprite_browser_panel._reload_frame_set_list()
+        self.colour_preview_panel._reload_preview()
         self.animation_player_panel._reload_car_checks()
         self.animation_player_panel._update_frame()
+        self.anchor_editor_panel.reload()
 
     def _set_project(self, project: RideProject, path: Path | None) -> None:
         self.project = project
         self.project_path = path
 
+        # AnchorEditorPanel last - its crosshair is the only stateful overlay
+        # item among the shared-preview panels, and set_image() wipes the
+        # whole scene, so anything set up before it would otherwise be wiped.
         self.project_panel.set_project(project)
+        self.layers_panel.set_project(project)
         self.sprite_browser_panel.set_project(project)
-        self.anchor_editor_panel.set_project(project)
         self.colour_preview_panel.set_project(project)
         self.animation_player_panel.set_project(project)
         self.program_editor_panel.set_project(project)
         self.build_panel.set_project(project)
+        self.anchor_editor_panel.set_project(project)
 
         self.setWindowTitle(f"Attraction Editor - {project.name}")
 
@@ -95,7 +223,7 @@ class MainWindow(QMainWindow):
             sprite_height_negative=85,
             sprite_height_positive=85,
             anchors=[DirectionAnchor(x=0, y=0) for _ in range(DIRECTIONS)],
-            core_sprite_dir="Frames/Core",
+            layers=[Layer(name="Core", sprite_dir="Frames/Core", kind="animated")],
             project_dir=Path(directory),
         )
         self._set_project(project, None)

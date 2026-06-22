@@ -15,11 +15,19 @@ def _normalize(entries: list[dict]) -> list[tuple[str, int, int]]:
     return [(e["path"].replace("\\", "/"), e["x"], e["y"]) for e in entries]
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
+def _structure_frame_dir(project):
+    # Relative, matching the shipped sprite_manifest.json's path convention.
+    return project.layers[0].sprite_dir
+
+
+@pytest.mark.skipif(
+    not (TILT_A_WHIRL_DIR / "sprite_manifest.json").exists(),
+    reason="Shipped sprite_manifest.json reference not available (retired during the layer-split asset migration)",
+)
 def test_manifest_matches_shipped_sprite_manifest():
     project = make_tilt_a_whirl_project()
 
-    generated = build_manifest(project)
+    generated = build_manifest(project, _structure_frame_dir(project))
     shipped = json.loads((TILT_A_WHIRL_DIR / "sprite_manifest.json").read_text(encoding="utf-8-sig"))
 
     assert len(generated) == len(shipped) == 4099
@@ -28,12 +36,12 @@ def test_manifest_matches_shipped_sprite_manifest():
 
 def test_manifest_image_count_matches_entry_count():
     project = make_tilt_a_whirl_project()
-    assert manifest_image_count(project) == len(build_manifest(project)) == 4099
+    assert manifest_image_count(project) == len(build_manifest(project, _structure_frame_dir(project))) == 12291
 
 
 def test_manifest_image_count_core_only():
     project = make_tilt_a_whirl_project()
     project.cars = []
-    # 3 thumbnails + 4 directions x 128 frames = 515, matching the Core-only
-    # object.json images range [0..514] from before riders were added.
-    assert manifest_image_count(project) == 515
+    # 3 thumbnails + 4 directions x 384 frames = 1539 (the post-compositing
+    # structure image count, riders excluded).
+    assert manifest_image_count(project) == 1539

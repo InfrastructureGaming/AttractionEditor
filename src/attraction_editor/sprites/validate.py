@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from PIL import Image
 
 from attraction_editor.model.project import DIRECTIONS, RideProject
-from attraction_editor.sprites.scanner import frame_path
+from attraction_editor.sprites.scanner import frame_path, static_frame_path
 
 BBox = tuple[int, int, int, int]
 
@@ -76,15 +76,25 @@ def validate_frame_set(
 
     for direction in range(DIRECTIONS):
         any_sample_non_blank = False
+        any_missing = False
 
         for frame in samples:
-            with Image.open(frame_path(sprite_dir, direction, frame)) as img:
+            path = frame_path(sprite_dir, direction, frame)
+            if not path.is_file():
+                report.issues.append(ValidationIssue("error", f"Missing frame: {path}"))
+                report.sample_bboxes[(direction, frame)] = None
+                any_missing = True
+                continue
+
+            with Image.open(path) as img:
                 bbox = alpha_bbox(img)
             report.sample_bboxes[(direction, frame)] = bbox
             if bbox is not None:
                 any_sample_non_blank = True
 
-        if not any_sample_non_blank:
+        # A missing frame is already reported above; running the fully-blank-vs-
+        # occlusion check below would just re-hit the same missing file.
+        if not any_sample_non_blank and not any_missing:
             if _direction_fully_blank(sprite_dir, direction, frames_per_dir):
                 report.issues.append(
                     ValidationIssue("error", f"Direction {direction} is entirely blank (0/{frames_per_dir} frames)")
@@ -103,10 +113,35 @@ def validate_frame_set(
 
 def _direction_fully_blank(sprite_dir, direction: int, frames_per_dir: int) -> bool:
     for frame in range(frames_per_dir):
-        with Image.open(frame_path(sprite_dir, direction, frame)) as img:
+        path = frame_path(sprite_dir, direction, frame)
+        if not path.is_file():
+            continue  # already reported as a missing-frame error by the caller
+        with Image.open(path) as img:
             if has_any_alpha(img):
                 return False
     return True
+
+
+def validate_static_layer(sprite_dir, name: str = "") -> FrameSetReport:
+    """A static layer has exactly one frame per direction (see
+    scanner.static_frame_path) - just check each direction's single frame
+    for alpha content, no sampling needed."""
+    report = FrameSetReport(name=name or str(sprite_dir))
+
+    for direction in range(DIRECTIONS):
+        path = static_frame_path(sprite_dir, direction)
+        if not path.is_file():
+            report.issues.append(ValidationIssue("error", f"Missing frame: {path}"))
+            report.sample_bboxes[(direction, 0)] = None
+            continue
+
+        with Image.open(path) as img:
+            bbox = alpha_bbox(img)
+        report.sample_bboxes[(direction, 0)] = bbox
+        if bbox is None:
+            report.issues.append(ValidationIssue("error", f"Direction {direction} is blank"))
+
+    return report
 
 
 def detect_duplicate_trajectories(reports: dict[str, FrameSetReport]) -> list[ValidationIssue]:
@@ -178,24 +213,29 @@ def validate_programs(project: RideProject) -> list[ValidationIssue]:
 
 
 def validate_project(project: RideProject) -> dict[str, FrameSetReport]:
-    """Validate the core structure and every rider car's frame set, plus
+    """Validate every structure layer and every rider car's frame set, plus
     cross-car duplicate-trajectory detection and (if project.programs is
     non-empty) animation phase/program frame-range checks. Returns a dict
-    keyed by "Core" / car.name / "Programs"; cross-car issues are appended to
-    each involved report's issue list."""
+    keyed by layer.name / car.name / "Programs"; cross-car issues are
+    appended to each involved report's issue list."""
     if project.project_dir is None:
         raise ValueError("RideProject.project_dir is not set")
 
     reports: dict[str, FrameSetReport] = {}
 
-    core_dir = project.project_dir / project.core_sprite_dir
-    reports["Core"] = validate_frame_set(core_dir, project.frames_per_dir, name="Core")
+    for layer in project.layers:
+        layer_dir = project.project_dir / layer.sprite_dir
+        if layer.kind == "static":
+            reports[layer.name] = validate_static_layer(layer_dir, name=layer.name)
+        else:
+            reports[layer.name] = validate_frame_set(layer_dir, project.frames_per_dir, name=layer.name)
 
+    layer_names = {layer.name for layer in project.layers}
     for car in project.cars:
         car_dir = project.project_dir / car.sprite_dir
         reports[car.name] = validate_frame_set(car_dir, project.frames_per_dir, name=car.name)
 
-    car_reports = {name: r for name, r in reports.items() if name != "Core"}
+    car_reports = {name: r for name, r in reports.items() if name not in layer_names}
     for issue in detect_duplicate_trajectories(car_reports):
         for name in car_reports:
             if f"{name!r}" in issue.message:
