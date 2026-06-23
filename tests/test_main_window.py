@@ -66,7 +66,7 @@ def test_every_section_is_collapsible(qtbot):
     titles = {s.toggle_button.text() for s in sections}
 
     assert titles == {
-        "Project", "Layers", "Sprites", "Anchors", "Colours", "Animation", "Programs & Phases", "Build",
+        "Project", "Ride Object", "Layers", "Sprites", "Anchors", "Colours", "Animation", "Programs & Phases", "Build",
     }
     for section in sections:
         # Default state: only Project starts expanded, everything else

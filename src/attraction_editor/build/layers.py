@@ -20,7 +20,7 @@ from pathlib import Path
 from PIL import Image
 
 from attraction_editor.build.compositing import composite_layer_stack
-from attraction_editor.build.dither import dither_frame_by_algorithm
+from attraction_editor.build.dither import dither_frame_by_algorithm, snap_to_palette
 from attraction_editor.model.project import DIRECTIONS, ColourScheme, Layer, RideProject
 from attraction_editor.palette.remap import remap_preview
 from attraction_editor.sprites.scanner import frame_path, static_frame_path
@@ -140,7 +140,17 @@ def composite_preview_frame(
 
     `scheme`, if given, renders with that colour scheme's preview recolour
     applied (cosmetic only - see render_layer_frame_preview). If None
-    (default), renders the raw structure exactly as it will actually ship."""
+    (default), renders the raw structure exactly as it will actually ship.
+
+    When `dither` is True, the composite is also snapped back onto the
+    StandardPalette after layers are merged (see dither.py's
+    snap_to_palette) - alpha-compositing partially-transparent layers
+    (anti-aliased edges, soft shadows) blends RGB values away from the
+    exact palette colours each layer was individually dithered to, which
+    openrct2-cli's own (non-dithered) -m closest pass would otherwise
+    re-quantise uncontrollably at build time. Skipped when dither is False,
+    consistent with that mode already skipping all per-layer palette
+    consideration too (fast, responsive, deliberately not paletted)."""
     cache: _RenderCache = {}
     if scheme is None:
         layer_images = [
@@ -151,7 +161,8 @@ def composite_preview_frame(
             render_layer_frame_preview(project, layer, direction, frame, scheme, dither=dither, cache=cache)
             for layer in project.layers
         ]
-    return composite_layer_stack(layer_images)
+    composite = composite_layer_stack(layer_images)
+    return snap_to_palette(composite) if dither else composite
 
 
 def build_composite_frames(
@@ -165,6 +176,15 @@ def build_composite_frames(
     writing the flattened results to tmp_dir/composited/dir{d}_f{f:04d}.png.
     Returns that directory. `on_progress(done, total)` fires after each
     composited frame is written.
+
+    When `dither` is True (the default - this is the real build path), each
+    composite is snapped back onto the StandardPalette after layers are
+    merged (see dither.py's snap_to_palette) for the same reason
+    composite_preview_frame does: alpha-compositing partially-transparent
+    layers blends RGB away from the exact palette colours each layer was
+    individually dithered to, which openrct2-cli's own (non-dithered)
+    -m closest pass would otherwise re-quantise uncontrollably, undoing the
+    careful per-layer dithering with banding at every layer seam.
     """
     out_dir = tmp_dir / "composited"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +200,8 @@ def build_composite_frames(
                 for layer in project.layers
             ]
             composite = composite_layer_stack(layer_images)
+            if dither:
+                composite = snap_to_palette(composite)
             composite.save(frame_path(out_dir, direction, frame))
 
             done += 1

@@ -46,6 +46,7 @@ from attraction_editor.ui.layers_panel import LayersPanel
 from attraction_editor.ui.preview_widget import PreviewWidget
 from attraction_editor.ui.program_editor_panel import ProgramEditorPanel
 from attraction_editor.ui.project_panel import ProjectPanel
+from attraction_editor.ui.ride_object_panel import RideObjectPanel
 from attraction_editor.ui.sprite_browser_panel import SpriteBrowserPanel
 
 PROJECT_FILE_FILTER = "Ride project (*.ridepkg.json);;All files (*)"
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
 
         self.project_panel = ProjectPanel()
+        self.ride_object_panel = RideObjectPanel()
         self.layers_panel = LayersPanel()
         self.sprite_browser_panel = SpriteBrowserPanel()
         self.anchor_editor_panel = AnchorEditorPanel()
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
 
         controls_column = QVBoxLayout()
         controls_column.addWidget(_wrap_in_group("Project", self.project_panel, expanded=True))
+        controls_column.addWidget(_wrap_in_group("Ride Object", self.ride_object_panel))
         controls_column.addWidget(_wrap_in_group("Layers", self.layers_panel))
         controls_column.addWidget(_wrap_in_group("Sprites", self.sprite_browser_panel))
         controls_column.addWidget(_wrap_in_group("Anchors", self.anchor_editor_panel))
@@ -254,6 +257,7 @@ class MainWindow(QMainWindow):
         # item among the shared-preview panels, and set_image() wipes the
         # whole scene, so anything set up before it would otherwise be wiped.
         self.project_panel.set_project(project)
+        self.ride_object_panel.set_project(project)
         self.layers_panel.set_project(project)
         self.sprite_browser_panel.set_project(project)
         self.colour_preview_panel.set_project(project)
@@ -276,8 +280,7 @@ class MainWindow(QMainWindow):
             category="thrill",
             frames_per_dir=128,
             sprite_width=122,
-            sprite_height_negative=85,
-            sprite_height_positive=85,
+            sprite_height=170,
             anchors=[DirectionAnchor(x=0, y=0) for _ in range(DIRECTIONS)],
             layers=[Layer(name="Core", sprite_dir="Frames/Core", kind="animated")],
             project_dir=Path(directory),

@@ -56,8 +56,7 @@ def make_tilt_a_whirl_project(project_dir: Path = TILT_A_WHIRL_DIR) -> RideProje
         category="thrill",
         frames_per_dir=384,
         sprite_width=122,
-        sprite_height_negative=85,
-        sprite_height_positive=85,
+        sprite_height=170,
         anchors=list(ANCHORS),
         layers=[
             Layer(name="Core_Static_0", sprite_dir="Frames/Core_Static_0", kind="static"),

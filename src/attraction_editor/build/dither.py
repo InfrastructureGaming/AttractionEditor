@@ -338,3 +338,32 @@ def dither_frame_by_algorithm(
     if algorithm == "atkinson":
         return dither_frame_atkinson(biased, strength=strength)
     raise ValueError(f"Unknown dither algorithm: {algorithm!r}")
+
+
+def snap_to_palette(img: Image.Image) -> Image.Image:
+    """Return an RGBA copy of `img` with every pixel snapped to its single
+    nearest StandardPalette RGB value - a clean one-shot nearest-match, no
+    dithering. Primary-remap indices excluded, same as every dithering
+    function in this module.
+
+    Needed after alpha-compositing multiple already-dithered (exact-palette)
+    layers together (build/compositing.py's composite_layer_stack):
+    Image.alpha_composite does a true per-channel weighted blend wherever
+    any layer has partial alpha (anti-aliased edges, soft shadows), which
+    produces off-palette RGB at those pixels even though every input layer
+    was itself dithered to exact palette colours beforehand. Left alone,
+    those off-palette pixels would be re-quantised uncontrollably by
+    openrct2-cli's own (non-dithered) -m closest pass at build time,
+    undermining the deliberate per-layer dithering choices with banding
+    that looks like dithering gone wrong at every layer seam. This is a
+    cleanup pass for that blending artefact, not a creative dithering
+    decision, so it's deliberately undithered - applying dithering again
+    here would just add a second, uncoordinated noise pattern on top of
+    each layer's own already-dithered result.
+    """
+    rgba = img.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    rgb_result = _quantise_to_real_rgb(rgba.convert("RGB"), dither=Image.Dither.NONE)
+    result = rgb_result.convert("RGBA")
+    result.putalpha(alpha)
+    return result

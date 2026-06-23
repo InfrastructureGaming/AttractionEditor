@@ -128,8 +128,7 @@ class RideProject:
     category: str
     frames_per_dir: int
     sprite_width: int
-    sprite_height_negative: int
-    sprite_height_positive: int
+    sprite_height: int
     anchors: list[DirectionAnchor]
     layers: list[Layer]
     cars: list[CarConfig] = field(default_factory=list)
@@ -151,6 +150,41 @@ class RideProject:
     # at the cost of some quantisation accuracy for the pixels it touches.
     trim_catch_tolerance: int = 0
     tertiary_catch_tolerance: int = 0
+    # Engine ride-object metadata authored into object.json on build (see
+    # build/object_json.py's write_object_json) - this tool owns the whole
+    # file, not just the build-computed fields, so anything the engine's
+    # RideObject reads has to live somewhere here. Scoped to what actually
+    # matters for a single-flat-ride-car configuration of "flat_ride_generic"
+    # (this project's own modular, self-contained flat-ride object type,
+    # always used here - see write_object_json's hardcoded properties.type)
+    # - not the full engine schema, most of which (go-kart/chairlift/minigolf
+    # physics, etc.) doesn't apply to a flat ride at all. ride_type/
+    # rotationMode/car spacing/mass were considered and deliberately dropped:
+    # rotationMode only affects rides without a flatRideAnimation block
+    # (UpdateFlatRideGeneric() bypasses it entirely once one exists, which it
+    # always does here), and spacing/mass are skipped by the engine entirely
+    # for any ride with carsPerFlatRide set (Ride.cpp's train-validation
+    # logic only runs for tracked rides).
+    authors: list[str] = field(default_factory=lambda: ["OpenRCT2 Dev Fork"])
+    version: str = "1.0"
+    car_tab_offset: int = 0
+    car_tab_scale: float = 0.0
+    car_num_seats: int = 0
+    car_visual: int = 1
+    car_draw_order: int = 6
+    capacity_text: str = ""  # strings.capacity, e.g. "24 passengers" - free text, not derived from car_num_seats
+    # manifest.json (see build/object_json.py's custom_ride_manifest) -
+    # CustomRideLoader.cpp's own ride-registration overrides, separate from
+    # anything in object.json/the .parkobj. build_cost is whole pounds, 0 =
+    # no override (engine keeps FlatRideGenericRTD's own default cost).
+    # rating_* are whole numbers 0-9 (per CustomRideLoader.cpp's own
+    # documented range) - default 3/2/1 matches the engine's own fallback
+    # when "ratings" is absent entirely, so leaving these untouched is
+    # equivalent to omitting the override, not an arbitrary placeholder.
+    build_cost: int = 0
+    rating_excitement: int = 3
+    rating_intensity: int = 2
+    rating_nausea: int = 1
     output_name: str = ""
     deploy_dir: str | None = None
     openrct2_cli_path: str | None = None
@@ -214,6 +248,14 @@ class RideProject:
             old_body = data.pop("body_colour", "white")
             old_trim = data.pop("trim_colour", "white")
             colour_schemes = [ColourScheme(trim_colour=old_body, tertiary_colour=old_trim)]
+
+        if "sprite_height" not in data and "sprite_height_negative" in data:
+            # Back-compat: pre-single-height projects split the sprite's
+            # vertical extent into negative/positive halves relative to the
+            # origin point - the same thing the anchor's y now expresses on
+            # its own (see build/object_json.py's invalidation_bounds), so
+            # total height is just their sum.
+            data["sprite_height"] = data.pop("sprite_height_negative") + data.pop("sprite_height_positive")
 
         return cls(
             anchors=anchors,

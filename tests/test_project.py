@@ -241,3 +241,103 @@ def test_load_back_compat_for_projects_without_catch_tolerance(tmp_path: Path):
 
     assert loaded.trim_catch_tolerance == 0
     assert loaded.tertiary_catch_tolerance == 0
+
+
+def test_load_back_compat_shim_for_sprite_height_negative_positive(tmp_path: Path):
+    """An old project file split sprite height into negative/positive
+    halves around the origin - must load as their sum, with neither old
+    key surviving onto the loaded RideProject."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data.pop("sprite_height")
+    data["sprite_height_negative"] = 85
+    data["sprite_height_positive"] = 90
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.sprite_height == 175
+    assert not hasattr(loaded, "sprite_height_negative")
+    assert not hasattr(loaded, "sprite_height_positive")
+
+
+def test_sprite_height_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.sprite_height = 265
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    loaded = type(project).load(path)
+
+    assert loaded.sprite_height == 265
+
+
+def test_ride_object_metadata_defaults(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+
+    assert project.authors == ["OpenRCT2 Dev Fork"]
+    assert project.version == "1.0"
+    assert project.car_tab_offset == 0
+    assert project.car_tab_scale == 0.0
+    assert project.car_num_seats == 0
+    assert project.car_visual == 1
+    assert project.car_draw_order == 6
+    assert project.capacity_text == ""
+    assert project.build_cost == 0
+    assert project.rating_excitement == 3
+    assert project.rating_intensity == 2
+    assert project.rating_nausea == 1
+
+
+def test_ride_object_metadata_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.authors = ["Jack", "Custom Rides Inc."]
+    project.version = "2.0"
+    project.car_tab_offset = -20
+    project.car_tab_scale = 0.5
+    project.car_num_seats = 24
+    project.car_visual = 1
+    project.car_draw_order = 6
+    project.build_cost = 1500
+    project.rating_excitement = 7
+    project.rating_intensity = 6
+    project.rating_nausea = 4
+    project.capacity_text = "24 passengers"
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    loaded = type(project).load(path)
+
+    assert loaded.authors == ["Jack", "Custom Rides Inc."]
+    assert loaded.version == "2.0"
+    assert loaded.car_tab_offset == -20
+    assert loaded.car_tab_scale == 0.5
+    assert loaded.car_num_seats == 24
+    assert loaded.car_visual == 1
+    assert loaded.car_draw_order == 6
+    assert loaded.capacity_text == "24 passengers"
+    assert loaded.build_cost == 1500
+    assert loaded.rating_excitement == 7
+    assert loaded.rating_intensity == 6
+    assert loaded.rating_nausea == 4
+
+
+def test_load_back_compat_for_projects_without_ride_object_metadata(tmp_path: Path):
+    """An old project file saved before this feature existed has none of
+    these keys - must load with defaults, not error."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    for key in (
+        "authors", "version",
+        "car_tab_offset", "car_tab_scale", "car_num_seats", "car_visual", "car_draw_order", "capacity_text",
+        "build_cost", "rating_excitement", "rating_intensity", "rating_nausea",
+    ):
+        data.pop(key)
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.authors == ["OpenRCT2 Dev Fork"]
+    assert loaded.car_visual == 1

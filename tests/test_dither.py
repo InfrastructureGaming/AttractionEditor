@@ -10,6 +10,7 @@ from attraction_editor.build.dither import (
     dither_frame_atkinson,
     dither_frame_bayer,
     dither_frame_by_algorithm,
+    snap_to_palette,
 )
 from attraction_editor.palette.remap import (
     PRIMARY_REMAP_START,
@@ -365,3 +366,66 @@ def test_dither_frame_by_algorithm_unknown_raises():
         assert False, "expected ValueError"
     except ValueError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# snap_to_palette
+# ---------------------------------------------------------------------------
+
+
+def test_snap_to_palette_fixes_alpha_blend_artifacts():
+    """Regression test for the actual bug report: Image.alpha_composite
+    blends two already-dithered (exact-palette) layers' RGB values
+    wherever either has partial alpha, producing off-palette pixels that
+    openrct2-cli's own -m closest pass would otherwise re-quantise
+    uncontrollably. snap_to_palette must put every pixel back on-palette."""
+    from attraction_editor.build.compositing import composite_layer_stack
+
+    palette_set = {tuple(rgb) for rgb in load_standard_palette()}
+
+    back = dither_frame(Image.new("RGBA", (10, 10), (200, 50, 50, 255)))
+
+    front = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+    for x in range(10):
+        for y in range(10):
+            front.putpixel((x, y), (50, 200, 50, 128))
+    front = dither_frame(front)
+
+    composite = composite_layer_stack([back, front])
+    assert any(px[:3] not in palette_set for px in composite.getdata())  # confirms the premise
+
+    snapped = snap_to_palette(composite)
+
+    assert all(px[:3] in palette_set for px in snapped.getdata())
+
+
+def test_snap_to_palette_preserves_alpha():
+    img = Image.new("RGBA", (2, 1), (123, 77, 201, 255))
+    img.putpixel((0, 0), (123, 77, 201, 0))
+    img.putpixel((1, 0), (123, 77, 201, 200))
+
+    result = snap_to_palette(img)
+
+    assert result.getpixel((0, 0))[3] == 0
+    assert result.getpixel((1, 0))[3] == 200
+
+
+def test_snap_to_palette_excludes_primary_remap_indices():
+    palette = load_standard_palette()
+    pal_map = {tuple(rgb): i for i, rgb in enumerate(palette)}
+
+    img = Image.new("RGBA", (1, 1), (*palette[PRIMARY_REMAP_START + 3], 255))
+    result = snap_to_palette(img)
+
+    idx = pal_map[result.getpixel((0, 0))[:3]]
+    assert not (PRIMARY_REMAP_START <= idx < PRIMARY_REMAP_START + REMAP_LENGTH)
+
+
+def test_snap_to_palette_is_a_no_op_for_already_exact_pixels():
+    """A frame that's already entirely on-palette (the common case for a
+    single, fully-opaque layer) should pass through unchanged."""
+    img = dither_frame(Image.new("RGBA", (8, 8), (90, 140, 30, 255)))
+
+    result = snap_to_palette(img)
+
+    assert result.convert("RGB").tobytes() == img.convert("RGB").tobytes()

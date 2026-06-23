@@ -190,7 +190,7 @@ def test_composite_preview_frame_combines_all_layers(tmp_path):
     project = make_multilayer_synthetic_project(tmp_path)
     result = composite_preview_frame(project, direction=0, frame=0)
     assert result.mode == "RGBA"
-    assert result.size == (project.sprite_width * 2, project.sprite_height_negative + project.sprite_height_positive)
+    assert result.size == (project.sprite_width * 2, project.sprite_height)
 
 
 def test_composite_preview_frame_with_scheme_differs_from_without(tmp_path):
@@ -241,3 +241,59 @@ def test_build_composite_frames_multilayer_mixed_algorithms(tmp_path):
             assert path.exists()
             with Image.open(path) as img:
                 assert img.mode == "RGBA"
+
+
+def _add_partial_alpha_foreground(project, seed: int = 99) -> None:
+    """Overwrite the project's foreground static layer with a uniformly
+    50%-alpha frame, for every direction - the synthetic fixtures otherwise
+    only ever write fully-opaque pixels, which wouldn't exercise the
+    alpha-blend-introduces-off-palette-colours bug at all."""
+    foreground = next(layer for layer in project.layers if layer.name == "Foreground")
+    sprite_dir = project.project_dir / foreground.sprite_dir
+    img = Image.new("RGBA", FRAME_SIZE, (0, 0, 0, 0))
+    for x in range(FRAME_SIZE[0]):
+        for y in range(FRAME_SIZE[1]):
+            img.putpixel((x, y), (60, 180, 90, 128))
+    from attraction_editor.sprites.scanner import static_frame_path
+
+    for direction in range(4):
+        img.save(static_frame_path(sprite_dir, direction))
+
+
+def test_composite_preview_frame_dithered_composite_is_fully_on_palette(tmp_path):
+    """Regression test for the real bug report: alpha-compositing several
+    already-dithered layers (build/compositing.py's composite_layer_stack)
+    blends RGB away from exact palette colours wherever any layer has
+    partial alpha, which the dithered preview/build path must correct
+    (build/dither.py's snap_to_palette) rather than leave for
+    openrct2-cli's own uncontrolled -m closest re-quantisation."""
+    palette_set = {tuple(rgb) for rgb in load_standard_palette()}
+    project = make_multilayer_synthetic_project(tmp_path)
+    _add_partial_alpha_foreground(project)
+
+    result = composite_preview_frame(project, direction=0, frame=0, dither=True)
+
+    assert all(px[:3] in palette_set for px in result.getdata())
+
+
+def test_composite_preview_frame_undithered_does_not_force_palette_snap(tmp_path):
+    """dither=False is the fast/responsive preview path that deliberately
+    skips all palette consideration - snap_to_palette must not run there."""
+    palette_set = {tuple(rgb) for rgb in load_standard_palette()}
+    project = make_multilayer_synthetic_project(tmp_path)
+    _add_partial_alpha_foreground(project)
+
+    result = composite_preview_frame(project, direction=0, frame=0, dither=False)
+
+    assert any(px[:3] not in palette_set for px in result.getdata())
+
+
+def test_build_composite_frames_output_is_fully_on_palette(tmp_path):
+    palette_set = {tuple(rgb) for rgb in load_standard_palette()}
+    project = make_multilayer_synthetic_project(tmp_path)
+    _add_partial_alpha_foreground(project)
+
+    out_dir = build_composite_frames(project, tmp_path, dither=True)
+
+    with Image.open(frame_path(out_dir, 0, 0)) as img:
+        assert all(px[:3] in palette_set for px in img.convert("RGBA").getdata())

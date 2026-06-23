@@ -1,5 +1,9 @@
 """Build & Package pipeline driven from a single button, with a streamed log
-and a build summary (flatRideAnimation values, image count, anchor positions)."""
+and a build summary (flatRideAnimation values, image count, anchor positions).
+
+Deploying also writes manifest.json alongside the .parkobj - a separate file
+this fork's CustomRideLoader.cpp needs to discover the ride at all (see
+build/object_json.py's custom_ride_manifest)."""
 
 from __future__ import annotations
 
@@ -7,8 +11,8 @@ from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from attraction_editor.build.handoff import generate_handoff_report
-from attraction_editor.build.object_json import update_object_json
-from attraction_editor.build.package import deploy_parkobj, package_parkobj
+from attraction_editor.build.object_json import write_object_json
+from attraction_editor.build.package import deploy_parkobj, package_parkobj, write_custom_ride_manifest
 from attraction_editor.build.sprite_builder import build_images_dat
 from attraction_editor.model.project import RideProject
 from attraction_editor.sprites.validate import validate_project
@@ -46,8 +50,8 @@ class _BuildWorker(QObject):
             result = build_images_dat(self.project, dither=True, on_progress=on_dither_progress)
             self.log.emit(f"  {result.image_count} images, {result.total_data_size} bytes total")
 
-            self.log.emit("Updating object.json (images range + flatRideAnimation)...")
-            update_object_json(self.project)
+            self.log.emit("Writing object.json...")
+            write_object_json(self.project)
 
             self.log.emit("Packaging .parkobj...")
             parkobj_path = package_parkobj(self.project)
@@ -57,6 +61,8 @@ class _BuildWorker(QObject):
                 self.log.emit("Deploying...")
                 dest = deploy_parkobj(self.project, parkobj_path)
                 self.log.emit(f"  Deployed to {dest}")
+                manifest_dest = write_custom_ride_manifest(self.project)
+                self.log.emit(f"  Wrote {manifest_dest}")
 
             self.finished.emit(True, "")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the log

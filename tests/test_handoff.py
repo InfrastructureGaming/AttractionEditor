@@ -22,10 +22,15 @@ def test_generate_handoff_report_tilt_a_whirl():
     assert "$LGX:images.dat[0..12290]" in report
     for direction, anchor in enumerate(project.anchors):
         assert f"dir{direction}: x={anchor.x}, y={anchor.y}" in report
-    # sprite_width=122 -> 244 (uncapped); height neg/pos=85 -> 170
-    assert "invalidationHalfWidth   = 244" in report
-    assert "invalidationHeightAbove = 170" in report
-    assert "invalidationHeightBelow = 170" in report
+    # invalidationHalfWidth/HeightAbove/HeightBelow are now derived from
+    # sprite_width/height and each direction's anchor (x/y), not authored
+    # directly - TiltAWhirl's real anchors aren't symmetric across
+    # directions, so take the max distance to each edge across all 4:
+    # width: left = max(-x) = 138, right = max(122+x) = 10 -> half=138*2=276, capped to 255.
+    # height: above = max(-y) = 95 -> *2 = 190; below = max(170+y) = 93 -> *2 = 186.
+    assert "invalidationHalfWidth   = 255" in report
+    assert "invalidationHeightAbove = 190" in report
+    assert "invalidationHeightBelow = 186" in report
 
 
 def test_generate_handoff_report_caps_at_uint8_max(tmp_path):

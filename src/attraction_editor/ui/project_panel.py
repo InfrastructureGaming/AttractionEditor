@@ -49,10 +49,13 @@ class ProjectPanel(QWidget):
 
         self.sprite_width_spin = QSpinBox()
         self.sprite_width_spin.setRange(0, 1024)
-        self.sprite_height_negative_spin = QSpinBox()
-        self.sprite_height_negative_spin.setRange(0, 1024)
-        self.sprite_height_positive_spin = QSpinBox()
-        self.sprite_height_positive_spin.setRange(0, 1024)
+        self.sprite_height_spin = QSpinBox()
+        self.sprite_height_spin.setRange(0, 1024)
+        self.sprite_height_spin.setToolTip(
+            "The rendered frame's total pixel height (e.g. 265 for a 384x265 sheet).\n"
+            "Where the origin point sits within that height is the Anchors section's job -\n"
+            "no need to split this into above/below halves yourself."
+        )
 
         self.output_name_edit = QLineEdit()
         self.deploy_dir_edit, deploy_row = _path_field(directory=True)
@@ -65,8 +68,7 @@ class ProjectPanel(QWidget):
         form.addRow("Category", self.category_combo)
         form.addRow("Sequence length (frames)", self.frames_per_dir_spin)
         form.addRow("Sprite width", self.sprite_width_spin)
-        form.addRow("Sprite height (negative)", self.sprite_height_negative_spin)
-        form.addRow("Sprite height (positive)", self.sprite_height_positive_spin)
+        form.addRow("Sprite height", self.sprite_height_spin)
         form.addRow("Output name", self.output_name_edit)
         form.addRow("Deploy folder", deploy_row)
         form.addRow("openrct2-cli path", cli_row)
@@ -82,8 +84,7 @@ class ProjectPanel(QWidget):
         self.category_combo.currentTextChanged.connect(self._on_simple_field_changed)
         self.frames_per_dir_spin.valueChanged.connect(self._on_simple_field_changed)
         self.sprite_width_spin.valueChanged.connect(self._on_simple_field_changed)
-        self.sprite_height_negative_spin.valueChanged.connect(self._on_simple_field_changed)
-        self.sprite_height_positive_spin.valueChanged.connect(self._on_simple_field_changed)
+        self.sprite_height_spin.valueChanged.connect(self._on_simple_field_changed)
         self.output_name_edit.textChanged.connect(self._on_simple_field_changed)
         self.deploy_dir_edit.textChanged.connect(self._on_simple_field_changed)
         self.openrct2_cli_edit.textChanged.connect(self._on_simple_field_changed)
@@ -101,8 +102,7 @@ class ProjectPanel(QWidget):
             self.category_combo.setCurrentText(project.category)
             self.frames_per_dir_spin.setValue(project.frames_per_dir)
             self.sprite_width_spin.setValue(project.sprite_width)
-            self.sprite_height_negative_spin.setValue(project.sprite_height_negative)
-            self.sprite_height_positive_spin.setValue(project.sprite_height_positive)
+            self.sprite_height_spin.setValue(project.sprite_height)
             self.output_name_edit.setText(project.output_name)
             self.deploy_dir_edit.setText(project.deploy_dir or "")
             self.openrct2_cli_edit.setText(project.openrct2_cli_path or "")
@@ -119,8 +119,7 @@ class ProjectPanel(QWidget):
         self.project.category = self.category_combo.currentText()
         self.project.frames_per_dir = self.frames_per_dir_spin.value()
         self.project.sprite_width = self.sprite_width_spin.value()
-        self.project.sprite_height_negative = self.sprite_height_negative_spin.value()
-        self.project.sprite_height_positive = self.sprite_height_positive_spin.value()
+        self.project.sprite_height = self.sprite_height_spin.value()
         self.project.output_name = self.output_name_edit.text()
         self.project.deploy_dir = self.deploy_dir_edit.text() or None
         self.project.openrct2_cli_path = self.openrct2_cli_edit.text() or None
