@@ -1,17 +1,16 @@
 """Smoke tests for MainWindow: instantiate every section (no tabs - all
-panels share one PreviewWidget + one Direction combo) and load the real
-TiltAWhirl project (7 cars, 4 anchors, sprite_width=122)."""
+panels share one PreviewWidget + one Direction combo) and load a synthetic
+project with real, renderable frames on disk."""
 
 from __future__ import annotations
 
-import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QScrollArea, QTabWidget
 
 from attraction_editor.ui.anchor_editor_panel import anchor_to_origin
 from attraction_editor.ui.collapsible_section import CollapsibleSection
 from attraction_editor.ui.main_window import MainWindow
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
+from tests.fixtures.synthetic import make_synthetic_project
 
 
 def test_main_window_constructs(qtbot):
@@ -32,8 +31,7 @@ def test_main_window_has_no_tabs(qtbot):
     assert window.findChild(QTabWidget) is None
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_dragging_splitter_never_triggers_horizontal_scrolling(qtbot):
+def test_dragging_splitter_never_triggers_horizontal_scrolling(qtbot, tmp_path):
     """QScrollArea.minimumSizeHint() ignores its content's width by design,
     so without an explicit floor a QSplitter will happily shrink the controls
     column past the point where its content needs to scroll horizontally.
@@ -44,7 +42,7 @@ def test_dragging_splitter_never_triggers_horizontal_scrolling(qtbot):
     window.resize(1400, 900)
     window.show()
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path, num_cars=2)
     window._set_project(project, None)
 
     scroll = window.findChild(QScrollArea)
@@ -158,22 +156,22 @@ def test_main_window_panels_share_one_preview_widget_and_direction_combo(qtbot):
         assert panel.direction_combo is window.direction_combo
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_main_window_loads_tilt_a_whirl(qtbot):
+def test_main_window_loads_project(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path, num_cars=2)
     window._set_project(project, None)
 
     assert window.project is project
     assert window.project_panel.isEnabled()
-    assert window.project_panel.id_edit.text() == "openrct2dev.ride.tilt_a_whirl"
-    assert window.layers_panel.car_list.count() == 7
+    assert window.project_panel.id_edit.text() == project.id
+    assert window.layers_panel.car_list.count() == len(project.cars)
 
-    assert window.sprite_browser_panel.frame_set_list.count() == 9  # Core_Static_0 + Core_Anim_0 + 7 cars
+    # One frame set per structure layer, plus one per car.
+    assert window.sprite_browser_panel.frame_set_list.count() == len(project.layers) + len(project.cars)
 
-    assert window.animation_player_panel.car_checks.keys() == {f"Car{i}" for i in range(7)}
+    assert window.animation_player_panel.car_checks.keys() == {car.name for car in project.cars}
 
     expected_origin = anchor_to_origin(project.anchors[0])
     pos = window.anchor_editor_panel.crosshair.pos()
@@ -182,12 +180,11 @@ def test_main_window_loads_tilt_a_whirl(qtbot):
     assert window.build_panel.project is project
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_colour_scheme_edit_updates_project(qtbot):
+def test_colour_scheme_edit_updates_project(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     window.colour_preview_panel.trim_combo.setCurrentText("yellow")
@@ -210,12 +207,11 @@ def test_dither_checkbox_moved_to_colours_section(qtbot):
         assert panel.dither_check is window.colour_preview_panel.dither_check
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_toggling_dither_checkbox_refreshes_animation_preview(qtbot):
+def test_toggling_dither_checkbox_refreshes_animation_preview(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     before = window.preview_widget.scene.items()
@@ -225,15 +221,14 @@ def test_toggling_dither_checkbox_refreshes_animation_preview(qtbot):
     assert before != after or len(after) > 0
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_toggling_dither_checkbox_changes_anchor_panels_render(qtbot):
+def test_toggling_dither_checkbox_changes_anchor_panels_render(qtbot, tmp_path):
     """Regression guard: AnchorEditorPanel didn't read the dither checkbox
     at all before this fix - toggling it had zero visible effect whenever
     Anchors was the last section to render into the shared preview."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     window.colour_preview_panel.dither_check.setChecked(False)
@@ -247,13 +242,12 @@ def test_toggling_dither_checkbox_changes_anchor_panels_render(qtbot):
     assert without_dither != with_dither
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_toggling_dither_checkbox_changes_layers_panels_render(qtbot):
+def test_toggling_dither_checkbox_changes_layers_panels_render(qtbot, tmp_path):
     """Same regression guard as above, for LayersPanel."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     window.colour_preview_panel.dither_check.setChecked(False)
@@ -267,8 +261,7 @@ def test_toggling_dither_checkbox_changes_layers_panels_render(qtbot):
     assert without_dither != with_dither
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_editing_catch_tolerance_refreshes_every_preview_panel(qtbot):
+def test_editing_catch_tolerance_refreshes_every_preview_panel(qtbot, tmp_path):
     """Trim/Tertiary catch tolerance (RideProject.trim_catch_tolerance/
     tertiary_catch_tolerance) affects every layer's dithering, not just
     Colours' own preview - changing it should refresh Layers/Animation/
@@ -276,7 +269,7 @@ def test_editing_catch_tolerance_refreshes_every_preview_panel(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     before = window.preview_widget.scene.items()
@@ -287,15 +280,14 @@ def test_editing_catch_tolerance_refreshes_every_preview_panel(qtbot):
     assert before != after or len(after) > 0
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_editing_layers_updates_shared_preview(qtbot):
+def test_editing_layers_updates_shared_preview(qtbot, tmp_path):
     """The main functional gain of this pass: LayersPanel had no preview at
     all before - now its edits reach the same shared surface as everything
     else."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     before = window.preview_widget.scene.items()
@@ -307,15 +299,14 @@ def test_editing_layers_updates_shared_preview(qtbot):
     assert before != after or len(after) > 0
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_applying_a_colour_scheme_reaches_every_preview_panel(qtbot):
+def test_applying_a_colour_scheme_reaches_every_preview_panel(qtbot, tmp_path):
     """ColourPreviewPanel owns the active-scheme state; Layers/Anchors/
     Animation must read it through the getter MainWindow wires up, not just
     Colours' own preview."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     # Wiring itself: every reader points at the same bound method.
@@ -338,15 +329,14 @@ def test_applying_a_colour_scheme_reaches_every_preview_panel(qtbot):
         assert panel._active_scheme_getter() is None
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_anchor_crosshair_survives_direction_change(qtbot):
+def test_anchor_crosshair_survives_direction_change(qtbot, tmp_path):
     """Regression test: AnchorEditorPanel must refresh last in every shared-
     preview cascade, or a later section's set_image() call deletes its
     crosshair overlay (scene.clear() wipes everything, not just its own)."""
     window = MainWindow()
     qtbot.addWidget(window)
 
-    project = make_tilt_a_whirl_project()
+    project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
 
     window.direction_combo.setCurrentIndex(1)

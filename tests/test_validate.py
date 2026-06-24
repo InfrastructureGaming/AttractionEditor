@@ -1,12 +1,10 @@
 """Unit tests for blank-frame and duplicate-trajectory diagnostics, using
-small synthetic frame sets, plus a sanity check against the real TiltAWhirl
-project (which should report no errors post-fix)."""
+small synthetic frame sets."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from PIL import Image
 
 from attraction_editor.model.project import DIRECTIONS, AnimationPhase, AnimationProgram
@@ -22,7 +20,6 @@ from attraction_editor.sprites.validate import (
     validate_static_layer,
 )
 from tests.fixtures.synthetic import make_multilayer_synthetic_project, make_synthetic_project
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
 
 SIZE = 8
 
@@ -216,19 +213,6 @@ def test_validate_project_multilayer_dispatches_by_kind(tmp_path):
     assert set(reports) >= {"Background", "Core", "Foreground"}
     for name in ("Background", "Core", "Foreground"):
         assert reports[name].ok
-
-
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_validate_project_tilt_a_whirl_has_no_errors():
-    project = make_tilt_a_whirl_project()
-    reports = validate_project(project)
-
-    assert set(reports) == {
-        "Core_Static_0", "Core_Anim_0", "Car0", "Car1", "Car2", "Car3", "Car4", "Car5", "Car6", "Programs",
-    }
-    for name, report in reports.items():
-        errors = [i for i in report.issues if i.severity == "error"]
-        assert errors == [], f"{name}: {errors}"
 
 
 def test_validate_programs_valid():

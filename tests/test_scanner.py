@@ -1,6 +1,4 @@
-"""Validates frame-set scanning against the real TiltAWhirl Frames directory
-(384x265 canvas; Core_Static_0 is a static layer, Core_Anim_0 + every car is
-an animated layer with frames_per_dir=384)."""
+"""Validates frame-set scanning against synthetic frame directories."""
 
 from __future__ import annotations
 
@@ -8,34 +6,15 @@ import pytest
 
 from attraction_editor.model.project import Layer
 from attraction_editor.sprites.scanner import FrameSetError, scan_layer, scan_project, scan_static_layer
-from tests.fixtures.synthetic import make_multilayer_synthetic_project, write_static_layer_frames
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
+from tests.fixtures.synthetic import make_multilayer_synthetic_project, make_synthetic_project, write_static_layer_frames
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_scan_project_finds_all_frame_sets():
-    project = make_tilt_a_whirl_project()
-
-    results = scan_project(project)
-
-    assert set(results) == {
-        "Core_Static_0", "Core_Anim_0", "Car0", "Car1", "Car2", "Car3", "Car4", "Car5", "Car6",
-    }
-    for name, info in results.items():
-        assert info.width == 384
-        assert info.height == 265
-        if name == "Core_Static_0":
-            assert info.frames_per_dir == 1
-        else:
-            assert info.frames_per_dir == 384
-
-
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
 def test_scan_project_detects_missing_frame(tmp_path):
-    project = make_tilt_a_whirl_project()
-    project.cars = project.cars[:1]
+    project = make_synthetic_project(tmp_path, num_cars=1)
     # Point Car0 at an empty directory to trigger a missing-frame error.
-    project.cars[0].sprite_dir = str(tmp_path)
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    project.cars[0].sprite_dir = str(empty_dir)
 
     with pytest.raises(FrameSetError, match="Missing frame"):
         scan_project(project)

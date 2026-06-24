@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from attraction_editor.build.object_json import (
     cars_block,
     colour_schemes_block,
@@ -19,20 +17,12 @@ from attraction_editor.build.object_json import (
 )
 from attraction_editor.model.project import AnimationPhase, AnimationProgram, ColourScheme, DirectionAnchor
 from tests.fixtures.synthetic import make_synthetic_project
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
 
 
 def test_images_range_string_synthetic(tmp_path):
     project = make_synthetic_project(tmp_path)
 
     assert images_range_string(project) == "$LGX:images.dat[0..10]"
-
-
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_images_range_string_tilt_a_whirl():
-    project = make_tilt_a_whirl_project()
-
-    assert images_range_string(project) == "$LGX:images.dat[0..12290]"
 
 
 def test_flat_ride_animation_block_empty_programs(tmp_path):

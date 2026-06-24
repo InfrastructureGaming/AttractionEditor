@@ -1,5 +1,5 @@
 """Unit tests for palette/remap.py - colour swatches and secondary/tertiary
-remap-range recolouring, plus a sanity check against a real TiltAWhirl frame."""
+remap-range recolouring, plus a sanity check against a real rendered frame."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from attraction_editor.palette.remap import (
     remap_preview,
 )
 from attraction_editor.sprites.scanner import frame_path
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
+from tests.fixtures.synthetic import make_synthetic_project
 
 
 def test_colour_swatch_rgb():
@@ -179,9 +179,8 @@ def test_remap_preview_trim_tolerance_narrows_recolouring():
     assert narrowed.getpixel((0, 0))[:3] == (143, 31, 60)  # excluded - original RGB kept
 
 
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_remap_preview_tilt_a_whirl_core_frame():
-    project = make_tilt_a_whirl_project()
+def test_remap_preview_real_frame_preserves_mode_size_and_alpha(tmp_path):
+    project = make_synthetic_project(tmp_path)
     core_dir = project.project_dir / project.layers[0].sprite_dir
 
     scheme = project.colour_schemes[0]

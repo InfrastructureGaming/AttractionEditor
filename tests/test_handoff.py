@@ -3,34 +3,9 @@ riderFrameStride, invalidation bounds, programs listing)."""
 
 from __future__ import annotations
 
-import pytest
-
 from attraction_editor.build.handoff import generate_handoff_report
 from attraction_editor.model.project import AnimationPhase, AnimationProgram
 from tests.fixtures.synthetic import make_synthetic_project
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
-
-
-@pytest.mark.skipif(not TILT_A_WHIRL_DIR.exists(), reason="TiltAWhirl project directory not available")
-def test_generate_handoff_report_tilt_a_whirl():
-    project = make_tilt_a_whirl_project()
-
-    report = generate_handoff_report(project)
-
-    assert "riderFrameStride      = 7" in report
-    assert "framesPerDir          = 384" in report
-    assert "$LGX:images.dat[0..12290]" in report
-    for direction, anchor in enumerate(project.anchors):
-        assert f"dir{direction}: x={anchor.x}, y={anchor.y}" in report
-    # invalidationHalfWidth/HeightAbove/HeightBelow are now derived from
-    # sprite_width/height and each direction's anchor (x/y), not authored
-    # directly - TiltAWhirl's real anchors aren't symmetric across
-    # directions, so take the max distance to each edge across all 4:
-    # width: left = max(-x) = 138, right = max(122+x) = 10 -> half=138*2=276, capped to 255.
-    # height: above = max(-y) = 95 -> *2 = 190; below = max(170+y) = 93 -> *2 = 186.
-    assert "invalidationHalfWidth   = 255" in report
-    assert "invalidationHeightAbove = 190" in report
-    assert "invalidationHeightBelow = 186" in report
 
 
 def test_generate_handoff_report_caps_at_uint8_max(tmp_path):

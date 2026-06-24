@@ -1,47 +1,29 @@
-"""Compares the generalized manifest builder's output against the shipped,
-hand-built sprite_manifest.json for TiltAWhirl (4099 entries, known-good)."""
+"""Tests for the generalized manifest builder: entry count vs.
+manifest_image_count's own math stays consistent for any project shape,
+checked against a synthetic project rather than one specific ride's
+hardcoded totals (every ride has its own frame count/car count, so a fixed
+expected number isn't a meaningful regression check going forward)."""
 
 from __future__ import annotations
 
-import json
-
-import pytest
-
 from attraction_editor.sprites.manifest import build_manifest, manifest_image_count
-from tests.fixtures.tilt_a_whirl import TILT_A_WHIRL_DIR, make_tilt_a_whirl_project
-
-
-def _normalize(entries: list[dict]) -> list[tuple[str, int, int]]:
-    return [(e["path"].replace("\\", "/"), e["x"], e["y"]) for e in entries]
+from tests.fixtures.synthetic import make_synthetic_project
 
 
 def _structure_frame_dir(project):
-    # Relative, matching the shipped sprite_manifest.json's path convention.
     return project.layers[0].sprite_dir
 
 
-@pytest.mark.skipif(
-    not (TILT_A_WHIRL_DIR / "sprite_manifest.json").exists(),
-    reason="Shipped sprite_manifest.json reference not available (retired during the layer-split asset migration)",
-)
-def test_manifest_matches_shipped_sprite_manifest():
-    project = make_tilt_a_whirl_project()
-
-    generated = build_manifest(project, _structure_frame_dir(project))
-    shipped = json.loads((TILT_A_WHIRL_DIR / "sprite_manifest.json").read_text(encoding="utf-8-sig"))
-
-    assert len(generated) == len(shipped) == 4099
-    assert _normalize(generated) == _normalize(shipped)
+def test_manifest_image_count_matches_entry_count(tmp_path):
+    project = make_synthetic_project(tmp_path, num_cars=2)
+    assert manifest_image_count(project) == len(build_manifest(project, _structure_frame_dir(project)))
 
 
-def test_manifest_image_count_matches_entry_count():
-    project = make_tilt_a_whirl_project()
-    assert manifest_image_count(project) == len(build_manifest(project, _structure_frame_dir(project))) == 12291
+def test_manifest_image_count_excludes_cars_when_none_configured(tmp_path):
+    project = make_synthetic_project(tmp_path, num_cars=2)
+    with_cars = manifest_image_count(project)
 
-
-def test_manifest_image_count_core_only():
-    project = make_tilt_a_whirl_project()
     project.cars = []
-    # 3 thumbnails + 4 directions x 384 frames = 1539 (the post-compositing
-    # structure image count, riders excluded).
-    assert manifest_image_count(project) == 1539
+    without_cars = manifest_image_count(project)
+
+    assert without_cars < with_cars
