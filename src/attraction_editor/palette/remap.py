@@ -245,3 +245,52 @@ def remap_preview(
     result = Image.fromarray(result_flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
     result.putalpha(alpha)
     return result
+
+
+def recolour_dithered_zones(image: Image.Image, trim_colour: str, tertiary_colour: str) -> Image.Image:
+    """Return an RGBA copy of `image` with its secondary/tertiary remap-zone
+    pixels recoloured to `trim_colour`/`tertiary_colour`'s ramps, via a
+    direct index lookup rather than remap_preview's distance-based
+    classification.
+
+    For use only on an image that has already been through
+    build.dither.dither_frame_by_algorithm's zone-constrained quantisation,
+    where every zone pixel is *guaranteed* to sit exactly on one of that
+    zone's 12 reference entries - so there's nothing to classify, just an
+    index to read and substitute. This is what build.layers.
+    render_layer_frame_preview uses for its dither=True path: dither the raw
+    reference shades first (exactly as the real build does), then recolour
+    the result, mirroring what the engine itself does at runtime (recolour
+    an already-dithered shipped sprite by index). Recolouring *before*
+    dithering - remap_preview's approach, used for the dither=False fast
+    preview where there's no quantised index yet to look up - would
+    collapse the zone's natural EEVEE gradient into flat per-shade bands
+    before dithering had a chance to diffuse error across it, losing detail
+    a real dithered build would have kept; that mismatch was visible as the
+    preview's dithering looking measurably less detailed/textured than the
+    shipped sprite's.
+    """
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+
+    rgb_arr = np.array(rgba.convert("RGB"), dtype=np.uint8)
+    h, w = rgb_arr.shape[:2]
+    flat = rgb_arr.reshape(-1, 3)
+
+    dist_sq = pixel_distances_to_palette(rgb_arr)
+    idx = np.argmin(dist_sq, axis=1)
+
+    palette = load_standard_palette()
+    ramps = load_colour_ramps()
+    trim_ramp = np.array([palette[i] for i in ramps[trim_colour]], dtype=np.uint8)
+    tertiary_ramp = np.array([palette[i] for i in ramps[tertiary_colour]], dtype=np.uint8)
+
+    result_flat = flat.copy()
+    secondary_hit = (idx >= SECONDARY_REMAP_START) & (idx < SECONDARY_REMAP_START + REMAP_LENGTH)
+    tertiary_hit = (idx >= TERTIARY_REMAP_START) & (idx < TERTIARY_REMAP_START + REMAP_LENGTH)
+    result_flat[secondary_hit] = trim_ramp[idx[secondary_hit] - SECONDARY_REMAP_START]
+    result_flat[tertiary_hit] = tertiary_ramp[idx[tertiary_hit] - TERTIARY_REMAP_START]
+
+    result = Image.fromarray(result_flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
+    result.putalpha(alpha)
+    return result

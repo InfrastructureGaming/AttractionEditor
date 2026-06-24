@@ -13,12 +13,12 @@ layer author's choice (Layer.dither_algorithm), not inferred from Layer.kind.
 
 Every algorithm, including Floyd-Steinberg, honours Layer.dither_strength
 (0-32, default 32 = full dithering, 0 = plain nearest-match with no
-dithering at all). PIL's built-in F-S quantisation (used for speed, since
-this is the default algorithm - see dither_frame) has no native intensity
-knob, so dither_frame blends it with the plain result via a deterministic
-Bayer-pattern mask rather than reducing the effect smoothly per pixel the
-way Atkinson's diffuse_fraction does; visually similar, implemented
-differently to avoid a slow manual diffusion loop on the common path.
+dithering at all). dither_frame's strength<32 path blends PIL's plain and
+fully-dithered results (both already exact palette colours) in continuous
+RGB space, then snaps the blend back to its nearest palette entry - see
+dither_frame's own docstring for the two slower/less correct approaches
+this replaced (a manual per-pixel diffusion loop, and blending the source
+toward its own plain value before a single dithering pass).
 
 Primary-remap palette entries (243-254) are excluded from the output, matching
 openrct2-cli's IsChangablePixel() behaviour which also excludes that range from
@@ -33,6 +33,19 @@ docstring and _apply_catch_tolerance_bias below). The colour-scheme preview
 the real build never calls that - the secondary/tertiary zone a pixel ends up
 in for the shipped sprite is decided entirely by whichever quantisation pass
 runs here.
+
+dither_frame_by_algorithm's quantisation is also zone-constrained: a pixel
+classified into the secondary or tertiary remap zone is only ever quantised
+against that zone's own 12 entries, and a pixel classified as neither is
+quantised against everything except both zones - never the unconstrained
+244-entry candidate set on its own. Without this, error-diffusion dithering
+can drift a zone pixel's accumulated error far enough that the globally
+nearest palette entry is a similar-looking but non-remappable colour just
+outside the zone; since the engine only recolours pixels whose index falls
+inside a watched zone range, an escaped pixel ships as a fixed, wrong
+colour regardless of which scheme the player picks (see
+dither_frame_by_algorithm's own docstring for the full mechanism - this was
+a real, confirmed bug, not a hypothetical).
 """
 
 from __future__ import annotations
@@ -52,18 +65,54 @@ from attraction_editor.palette.remap import (
     pixel_distances_to_palette,
 )
 
-# A colour that no EEVEE-rendered pixel will ever be near, used to fill the
-# excluded primary-remap palette slots so F-S never assigns pixels there.
+# A colour that no EEVEE-rendered pixel will ever be near, used to fill
+# excluded palette slots so quantisation never assigns pixels there.
 _SENTINEL_RGB = (0, 255, 0)  # pure green; absent from both remap zones and normal geometry
 
 
 @lru_cache(maxsize=1)
-def _build_quantise_palette() -> Image.Image:
-    """PIL P-mode image for Image.quantize(), with primary-remap slots (243-254)
-    replaced by a sentinel colour so F-S never assigns pixels to those indices."""
+def all_non_primary_indices() -> frozenset[int]:
+    """Every palette index except the 12 primary-remap slots (243-254) -
+    the default candidate set for ordinary (zone-unaware) quantisation."""
+    primary = range(PRIMARY_REMAP_START, PRIMARY_REMAP_START + REMAP_LENGTH)
+    return frozenset(range(256)) - frozenset(primary)
+
+
+@lru_cache(maxsize=1)
+def secondary_zone_indices() -> frozenset[int]:
+    return frozenset(range(SECONDARY_REMAP_START, SECONDARY_REMAP_START + REMAP_LENGTH))
+
+
+@lru_cache(maxsize=1)
+def tertiary_zone_indices() -> frozenset[int]:
+    return frozenset(range(TERTIARY_REMAP_START, TERTIARY_REMAP_START + REMAP_LENGTH))
+
+
+@lru_cache(maxsize=1)
+def structure_indices() -> frozenset[int]:
+    """Every valid index except both remap zones - the candidate set for
+    pixels that don't belong to either zone, so ordinary structure can never
+    be diffused into a colour the engine would mistake for recolourable
+    trim/tertiary at runtime (the mirror-image of the zone-escape bug)."""
+    return all_non_primary_indices() - secondary_zone_indices() - tertiary_zone_indices()
+
+
+def _resolve_allowed(allowed_indices: frozenset[int] | None) -> frozenset[int]:
+    return allowed_indices if allowed_indices is not None else all_non_primary_indices()
+
+
+@lru_cache(maxsize=8)
+def _build_quantise_palette(allowed_indices: frozenset[int]) -> Image.Image:
+    """PIL P-mode image for Image.quantize(), with every slot not in
+    `allowed_indices` replaced by a sentinel colour so quantisation can never
+    assign a pixel to an excluded index - whether that's just the primary
+    slots (today's default, ordinary quantisation) or also one or both
+    remap zones (zone-constrained quantisation, see
+    dither_frame_by_algorithm)."""
     entries = [list(rgb) for rgb in load_standard_palette()]
-    for i in range(PRIMARY_REMAP_START, PRIMARY_REMAP_START + REMAP_LENGTH):
-        entries[i] = list(_SENTINEL_RGB)
+    for i in range(256):
+        if i not in allowed_indices:
+            entries[i] = list(_SENTINEL_RGB)
     pal_img = Image.new("P", (1, 1))
     pal_img.putpalette([c for rgb in entries for c in rgb])
     return pal_img
@@ -75,16 +124,16 @@ def _real_palette_flat() -> list[int]:
     return [c for rgb in load_standard_palette() for c in rgb]
 
 
-@lru_cache(maxsize=REMAP_LENGTH)
-def _nearest_valid_index(sentinel_idx: int) -> int:
-    """Nearest non-primary-remap palette index to `sentinel_idx`, by RGB distance.
-    Used as a safety net; in practice F-S should never land on sentinel slots."""
+@lru_cache(maxsize=None)
+def _nearest_allowed_index(sentinel_idx: int, allowed_indices: frozenset[int]) -> int:
+    """Nearest `allowed_indices` palette index to `sentinel_idx`, by RGB
+    distance. Used as a safety net; in practice quantisation should never
+    land on a sentinel slot."""
     palette = load_standard_palette()
     r, g, b = palette[sentinel_idx]
-    best_idx, best_dist = 0, float("inf")
-    for i, (pr, pg, pb) in enumerate(palette):
-        if PRIMARY_REMAP_START <= i < PRIMARY_REMAP_START + REMAP_LENGTH:
-            continue
+    best_idx, best_dist = next(iter(allowed_indices)), float("inf")
+    for i in allowed_indices:
+        pr, pg, pb = palette[i]
         d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
         if d < best_dist:
             best_dist = d
@@ -92,33 +141,40 @@ def _nearest_valid_index(sentinel_idx: int) -> int:
     return best_idx
 
 
-def _fix_sentinel_pixels(indexed: Image.Image) -> None:
-    """In-place: replace any pixel at a primary-remap index with the nearest
-    valid palette index.  This is a defensive pass; well-rendered frames
+def _fix_sentinel_pixels(indexed: Image.Image, allowed_indices: frozenset[int]) -> None:
+    """In-place: replace any pixel at an excluded index with the nearest
+    allowed palette index. This is a defensive pass; well-rendered frames
     should produce zero sentinel hits."""
     px = indexed.load()
     w, h = indexed.size
     for y in range(h):
         for x in range(w):
             idx = px[x, y]  # type: ignore[index]
-            if PRIMARY_REMAP_START <= idx < PRIMARY_REMAP_START + REMAP_LENGTH:
-                px[x, y] = _nearest_valid_index(idx)  # type: ignore[index]
+            if idx not in allowed_indices:
+                px[x, y] = _nearest_allowed_index(idx, allowed_indices)  # type: ignore[index]
 
 
-def _quantise_to_real_rgb(rgb_img: Image.Image, *, dither: Image.Dither) -> Image.Image:
+def _quantise_to_real_rgb(
+    rgb_img: Image.Image, *, dither: Image.Dither, allowed_indices: frozenset[int] | None = None
+) -> Image.Image:
     """Quantise `rgb_img` (mode "RGB") into the sentinel-excluded palette
     with the given PIL dither mode, then expand back to exact real-palette
     RGB values (see dither_frame's docstring for why: the sentinel palette
-    only exists to keep primary-remap slots out of the nearest-neighbour
-    race, real output pixels must carry the actual StandardPalette colour)."""
-    indexed = rgb_img.quantize(palette=_build_quantise_palette(), dither=dither)
-    _fix_sentinel_pixels(indexed)
+    only exists to keep excluded slots out of the nearest-neighbour race,
+    real output pixels must carry the actual StandardPalette colour).
+
+    `allowed_indices` defaults to all_non_primary_indices() (today's
+    ordinary behaviour); dither_frame_by_algorithm passes a zone-restricted
+    set instead, for zone-constrained quantisation."""
+    allowed = _resolve_allowed(allowed_indices)
+    indexed = rgb_img.quantize(palette=_build_quantise_palette(allowed), dither=dither)
+    _fix_sentinel_pixels(indexed, allowed)
     real_pal = indexed.copy()
     real_pal.putpalette(_real_palette_flat())
     return real_pal.convert("RGB")
 
 
-def dither_frame(img: Image.Image, *, strength: int = 32) -> Image.Image:
+def dither_frame(img: Image.Image, *, strength: int = 32, allowed_indices: frozenset[int] | None = None) -> Image.Image:
     """Return an RGBA copy of `img` with Floyd-Steinberg dithering into the
     RCT2 StandardPalette, preserving the alpha channel.
 
@@ -126,39 +182,61 @@ def dither_frame(img: Image.Image, *, strength: int = 32) -> Image.Image:
     so the result is safe to pass to openrct2-cli -m closest.  Every output
     pixel is the exact RGB value of its assigned StandardPalette entry.
 
+    `allowed_indices`, if given, further restricts the candidate set (e.g.
+    to just one remap zone's 12 entries) - see dither_frame_by_algorithm for
+    why and how this is combined per pixel.
+
     `strength` (0-32, default 32 = full classic Floyd-Steinberg) lets a layer
     author dial the effect back, the same way dither_frame_bayer/_atkinson's
-    `strength` does. PIL's built-in F-S dithering (used here for speed - this
-    is the default algorithm, so a slow per-pixel Python loop here would cost
-    every layer, not just ones that opt into a strength below 32) has no
-    native intensity knob, so strength<32 instead blends the fully-dithered
-    result with the plain (undithered) nearest-match result, deterministically
-    selecting per pixel via the same Bayer threshold pattern
-    dither_frame_bayer uses for its own perturbation - this keeps the
-    blend repeatable frame to frame (no flicker) and reuses an already-fast
-    code path rather than adding a second, slower dithering implementation.
-    At strength=32 this returns byte-identical output to always having
-    selected the dithered value (today's original, only behaviour).
+    `strength` does. At strength=32, PIL's fast built-in F-S quantisation is
+    used directly on the source. At strength=0, it's the plain (undithered)
+    nearest-match result. In between: compute both the plain and the fully
+    F-S-dithered result (both already exact palette colours), linearly blend
+    them in continuous RGB space by `strength/32`, then snap that blend back
+    to its single nearest palette entry (no further dithering - this last
+    step is just resolving the in-between blend, not diffusing new error).
+    All PIL/numpy array ops, no manual per-pixel loop, so cost is
+    independent of strength.
+
+    Two earlier, less correct attempts at this:
+    - A manual per-pixel loop scaling the diffused error fraction directly
+      (mirroring dither_frame_atkinson's diffuse_fraction) was correct but
+      ~1s/frame on a real layer - a "build takes 10x longer" regression,
+      since this is the default algorithm.
+    - Blending the *source* toward its own plain-quantised value before a
+      single F-S pass (instead of blending the two already-dithered
+      candidates after) was fast, but plain quantisation alone collapses a
+      typical EEVEE render to a handful of flat colour bands; blending only
+      a small fraction of the original signal back in wasn't enough to
+      break that banding before F-S ran, so the result still looked
+      artificially regular - just shaped by the banding instead of by a
+      spatial mask.
+
+    Blending two *already on-palette* candidates avoids both: each
+    candidate already has F-S's natural per-pixel variation (no banding to
+    introduce regularity), and which one wins after the final snap is a
+    function of how close that pixel's blend happens to land to each
+    candidate - not a fixed grid or a flattened intermediate.
     """
     rgba = img.convert("RGBA")
     alpha = rgba.getchannel("A")
     rgb = rgba.convert("RGB")
 
-    dithered_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.FLOYDSTEINBERG)
-
     strength = min(32, max(0, strength))
-    if strength < 32:
-        plain_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.NONE)
-        h, w = rgba.size[1], rgba.size[0]
-        tile = np.tile(_bayer_matrix_8x8(), (h // 8 + 1, w // 8 + 1))[:h, :w]
-        # Bayer matrix values run 0..63; a pixel keeps the dithered value
-        # only if its threshold falls below strength's share of that range.
-        use_dithered = tile < (strength / 32.0) * 64
-        dithered_arr = np.asarray(dithered_rgb)
-        plain_arr = np.asarray(plain_rgb)
-        rgb_result = Image.fromarray(np.where(use_dithered[:, :, None], dithered_arr, plain_arr), mode="RGB")
+    if strength >= 32:
+        rgb_result = _quantise_to_real_rgb(rgb, dither=Image.Dither.FLOYDSTEINBERG, allowed_indices=allowed_indices)
     else:
-        rgb_result = dithered_rgb
+        plain_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.NONE, allowed_indices=allowed_indices)
+        if strength <= 0:
+            rgb_result = plain_rgb
+        else:
+            full_rgb = _quantise_to_real_rgb(rgb, dither=Image.Dither.FLOYDSTEINBERG, allowed_indices=allowed_indices)
+            plain_arr = np.asarray(plain_rgb, dtype=np.float64)
+            full_arr = np.asarray(full_rgb, dtype=np.float64)
+            fraction = strength / 32.0
+            blended_arr = plain_arr + (full_arr - plain_arr) * fraction
+            blended_img = Image.fromarray(np.clip(blended_arr, 0, 255).astype(np.uint8), mode="RGB")
+            rgb_result = _quantise_to_real_rgb(blended_img, dither=Image.Dither.NONE, allowed_indices=allowed_indices)
 
     result = rgb_result.convert("RGBA")
     result.putalpha(alpha)
@@ -181,7 +259,9 @@ def _bayer_matrix_8x8() -> np.ndarray:
     return matrix.astype(np.int64)
 
 
-def dither_frame_bayer(img: Image.Image, *, strength: int = 32) -> Image.Image:
+def dither_frame_bayer(
+    img: Image.Image, *, strength: int = 32, allowed_indices: frozenset[int] | None = None
+) -> Image.Image:
     """Return an RGBA copy of `img` ordered-dithered into the RCT2
     StandardPalette using a tiled 8x8 Bayer threshold matrix, preserving the
     alpha channel.
@@ -190,6 +270,9 @@ def dither_frame_bayer(img: Image.Image, *, strength: int = 32) -> Image.Image:
     pixel depends only on (x, y) mod 8 and that pixel's own colour - never on
     neighbouring pixels - so the same spatial noise pattern repeats on every
     frame of an animation instead of drifting ("boiling") frame to frame.
+
+    `allowed_indices`, if given, restricts the quantisation target the same
+    way dither_frame's does - see dither_frame_by_algorithm.
 
     `strength` is the full perturbation range in palette RGB units (centered
     on the source colour); 0 degenerates to plain nearest-colour matching.
@@ -206,8 +289,9 @@ def dither_frame_bayer(img: Image.Image, *, strength: int = 32) -> Image.Image:
     perturbed = np.clip(arr + offset[:, :, None], 0, 255).astype(np.uint8)
     perturbed_img = Image.fromarray(perturbed, mode="RGB")
 
-    indexed = perturbed_img.quantize(palette=_build_quantise_palette(), dither=Image.Dither.NONE)
-    _fix_sentinel_pixels(indexed)
+    allowed = _resolve_allowed(allowed_indices)
+    indexed = perturbed_img.quantize(palette=_build_quantise_palette(allowed), dither=Image.Dither.NONE)
+    _fix_sentinel_pixels(indexed, allowed)
 
     real_pal = indexed.copy()
     real_pal.putpalette(_real_palette_flat())
@@ -223,7 +307,9 @@ def dither_frame_bayer(img: Image.Image, *, strength: int = 32) -> Image.Image:
 _ATKINSON_OFFSETS = ((1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2))
 
 
-def dither_frame_atkinson(img: Image.Image, *, strength: int = 32) -> Image.Image:
+def dither_frame_atkinson(
+    img: Image.Image, *, strength: int = 32, allowed_indices: frozenset[int] | None = None
+) -> Image.Image:
     """Return an RGBA copy of `img` Atkinson-dithered into the RCT2
     StandardPalette, preserving the alpha channel.
 
@@ -233,6 +319,9 @@ def dither_frame_atkinson(img: Image.Image, *, strength: int = 32) -> Image.Imag
     Floyd-Steinberg does. Provided as a per-layer author choice, not
     recommended for animated layers.
 
+    `allowed_indices`, if given, restricts the quantisation target the same
+    way dither_frame's does - see dither_frame_by_algorithm.
+
     `strength` scales the fraction of error diffused (32 ~= classic Atkinson
     at full RGB-unit error; 0 degenerates to plain nearest-colour matching).
     """
@@ -240,7 +329,7 @@ def dither_frame_atkinson(img: Image.Image, *, strength: int = 32) -> Image.Imag
     alpha = rgba.getchannel("A")
 
     palette = load_standard_palette()
-    valid_indices = [i for i in range(len(palette)) if not (PRIMARY_REMAP_START <= i < PRIMARY_REMAP_START + REMAP_LENGTH)]
+    valid_indices = sorted(_resolve_allowed(allowed_indices))
     valid_palette = np.array([palette[i] for i in valid_indices], dtype=np.float64)
 
     arr = np.asarray(rgba.convert("RGB"), dtype=np.float64).copy()
@@ -265,24 +354,29 @@ def dither_frame_atkinson(img: Image.Image, *, strength: int = 32) -> Image.Imag
     return result
 
 
-def _apply_catch_tolerance_bias(img: Image.Image, trim_tolerance: int, tertiary_tolerance: int) -> Image.Image:
+def _apply_catch_tolerance_bias(
+    img: Image.Image, trim_tolerance: int, tertiary_tolerance: int
+) -> tuple[Image.Image, np.ndarray, np.ndarray]:
     """Pre-snap borderline pixels toward (or away from) the secondary/
     tertiary remap zones before quantising, per RideProject's
-    trim_catch_tolerance/tertiary_catch_tolerance.
+    trim_catch_tolerance/tertiary_catch_tolerance - and always return each
+    pixel's final zone classification too (shape (H, W) bool each), needed
+    by dither_frame_by_algorithm's zone-constrained quantisation regardless
+    of whether a tolerance is in use: tolerance=0 reproduces the original
+    "single nearest match decides" rule exactly (see classify_remap_zone),
+    so it's already the right classification to constrain by, not just a
+    bias-pixel special case.
 
-    At tolerance=0 for both zones, this is a pure no-op - returns `img`
-    unchanged - so existing dithering output is byte-identical whenever the
-    feature isn't in use. For a nonzero tolerance, only the specific pixels
-    whose zone classification actually *changes* (classify_remap_zone's
-    `caught & ~natural_win`, pulled in by widening, or `natural_win &
-    ~caught`, excluded by narrowing) are touched; pixels that already
+    The returned image is unchanged from `img` whenever both tolerances are
+    0 (today's original, only behaviour) - this is still a pure no-op for
+    the *image*. For a nonzero tolerance, only the specific pixels whose
+    zone classification actually *changes* (classify_remap_zone's `caught &
+    ~natural_win`, pulled in by widening, or `natural_win & ~caught`,
+    excluded by narrowing) have their RGB touched; pixels that already
     resolve correctly on their own keep their exact original RGB, so the
     residual quantisation error they naturally contribute to error-diffusion
     dithering (Floyd-Steinberg/Atkinson) is undisturbed.
     """
-    if trim_tolerance == 0 and tertiary_tolerance == 0:
-        return img
-
     rgba = img.convert("RGBA")
     alpha = rgba.getchannel("A")
     rgb_arr = np.array(rgba.convert("RGB"), dtype=np.uint8)
@@ -294,20 +388,38 @@ def _apply_catch_tolerance_bias(img: Image.Image, trim_tolerance: int, tertiary_
     global_min_idx = np.argmin(dist_sq, axis=1)
     global_min_dist_sq = np.min(dist_sq, axis=1)
 
+    zone_masks: dict[int, np.ndarray] = {}
     for zone_start, tolerance in ((SECONDARY_REMAP_START, trim_tolerance), (TERTIARY_REMAP_START, tertiary_tolerance)):
-        if tolerance == 0:
-            continue
         caught, shade_idx, natural_win, best_other_idx = classify_remap_zone(
             dist_sq, zone_start, tolerance, global_min_dist_sq=global_min_dist_sq, global_min_idx=global_min_idx
         )
-        pulled_in = caught & ~natural_win
-        pushed_out = natural_win & ~caught
-        flat[pulled_in] = palette[zone_start + shade_idx[pulled_in]]
-        flat[pushed_out] = palette[best_other_idx[pushed_out]]
+        zone_masks[zone_start] = caught
+        if tolerance != 0:
+            pulled_in = caught & ~natural_win
+            pushed_out = natural_win & ~caught
+            flat[pulled_in] = palette[zone_start + shade_idx[pulled_in]]
+            flat[pushed_out] = palette[best_other_idx[pushed_out]]
 
-    result = Image.fromarray(flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
-    result.putalpha(alpha)
-    return result
+    secondary_mask = zone_masks[SECONDARY_REMAP_START].reshape(h, w)
+    tertiary_mask = zone_masks[TERTIARY_REMAP_START].reshape(h, w)
+
+    # Resolve the (in practice vanishingly rare) case where both zones claim
+    # the same pixel - same tie-break remap_preview uses: whichever zone is
+    # actually closer wins.
+    both = secondary_mask & tertiary_mask
+    if np.any(both):
+        sec_dist = np.min(dist_sq[:, SECONDARY_REMAP_START : SECONDARY_REMAP_START + REMAP_LENGTH], axis=1).reshape(h, w)
+        ter_dist = np.min(dist_sq[:, TERTIARY_REMAP_START : TERTIARY_REMAP_START + REMAP_LENGTH], axis=1).reshape(h, w)
+        secondary_mask = secondary_mask & ~(both & (ter_dist < sec_dist))
+        tertiary_mask = tertiary_mask & ~(both & (sec_dist <= ter_dist))
+
+    if trim_tolerance == 0 and tertiary_tolerance == 0:
+        result = img.convert("RGBA")
+    else:
+        result = Image.fromarray(flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
+        result.putalpha(alpha)
+
+    return result, secondary_mask, tertiary_mask
 
 
 def dither_frame_by_algorithm(
@@ -326,18 +438,64 @@ def dither_frame_by_algorithm(
     for the three real dithering algorithms - this is the one place that
     decides classification for the shipped sprite (see this module's
     docstring). Not applied for "none": the artist's explicit choice to skip
-    quantisation entirely should mean no palette-snapping of any kind."""
+    quantisation entirely should mean no palette-snapping of any kind.
+
+    Zone-constrained quantisation: a pixel classified into the secondary or
+    tertiary zone is quantised against *only that zone's* 12 entries, never
+    the full palette - and a pixel classified as neither is quantised
+    against everything except both zones. Without this, ordinary
+    error-diffusion dithering (Floyd-Steinberg in particular, since its
+    accumulated error is unbounded along a scanline, unlike Bayer's fixed
+    perturbation) can push a pixel that started as an exact zone reference
+    shade to drift, under diffused error from its neighbours, to whichever
+    palette entry is globally nearest - which is sometimes a similar-looking
+    but non-remappable colour just outside the zone. The engine only
+    recolours pixels whose *index* falls inside a watched zone range at
+    render time, so an escaped pixel never gets recoloured: it ships as a
+    fixed, wrong-looking colour regardless of which colour scheme the
+    player picks. This showed up as light-red speckling concentrated in
+    lighter trim/tertiary shades (closer in RGB space to the nearest
+    non-zone "escape route") and absent everywhere else - invisible in this
+    tool's own preview (which shows the raw, un-recoloured reference
+    shades, so an escaped pixel still looks like a plausible neighbour) but
+    glaring in-game once the *zone* pixels around it get recoloured to a
+    totally different hue.
+
+    Implementation: each algorithm runs up to three times against
+    progressively restricted candidate sets (structure_indices() by
+    default, plus secondary_zone_indices()/tertiary_zone_indices() only if
+    any pixel actually classifies into that zone), and the results are
+    combined per pixel by classification. A layer with no remap-zone
+    content at all (most background/structural layers) pays for exactly
+    one pass, same as before this existed.
+    """
     if algorithm == "none":
         return img.convert("RGBA")
 
-    biased = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
-    if algorithm == "floyd_steinberg":
-        return dither_frame(biased, strength=strength)
-    if algorithm == "bayer":
-        return dither_frame_bayer(biased, strength=strength)
-    if algorithm == "atkinson":
-        return dither_frame_atkinson(biased, strength=strength)
-    raise ValueError(f"Unknown dither algorithm: {algorithm!r}")
+    dither_fn = {"floyd_steinberg": dither_frame, "bayer": dither_frame_bayer, "atkinson": dither_frame_atkinson}.get(
+        algorithm
+    )
+    if dither_fn is None:
+        raise ValueError(f"Unknown dither algorithm: {algorithm!r}")
+
+    biased, secondary_mask, tertiary_mask = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
+
+    has_secondary = bool(np.any(secondary_mask))
+    has_tertiary = bool(np.any(tertiary_mask))
+    if not has_secondary and not has_tertiary:
+        return dither_fn(biased, strength=strength)
+
+    structure_result = dither_fn(biased, strength=strength, allowed_indices=structure_indices())
+    result_arr = np.asarray(structure_result.convert("RGBA")).copy()
+
+    if has_secondary:
+        secondary_result = dither_fn(biased, strength=strength, allowed_indices=secondary_zone_indices())
+        result_arr[secondary_mask] = np.asarray(secondary_result.convert("RGBA"))[secondary_mask]
+    if has_tertiary:
+        tertiary_result = dither_fn(biased, strength=strength, allowed_indices=tertiary_zone_indices())
+        result_arr[tertiary_mask] = np.asarray(tertiary_result.convert("RGBA"))[tertiary_mask]
+
+    return Image.fromarray(result_arr, mode="RGBA")
 
 
 def snap_to_palette(img: Image.Image) -> Image.Image:

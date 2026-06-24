@@ -22,7 +22,7 @@ from PIL import Image
 from attraction_editor.build.compositing import composite_layer_stack
 from attraction_editor.build.dither import dither_frame_by_algorithm, snap_to_palette
 from attraction_editor.model.project import DIRECTIONS, ColourScheme, Layer, RideProject
-from attraction_editor.palette.remap import remap_preview
+from attraction_editor.palette.remap import recolour_dithered_zones, remap_preview
 from attraction_editor.sprites.scanner import frame_path, static_frame_path
 
 # Cache key: (layer.sprite_dir, direction). Only meaningful for static layers,
@@ -93,32 +93,46 @@ def render_layer_frame_preview(
     cache: _RenderCache | None = None,
 ) -> Image.Image:
     """Preview-only: like render_layer_frame, but applies `scheme`'s
-    trim/tertiary colours via remap_preview before dithering, so the UI can
-    show what a given default colour scheme would look like. Never used by
-    the real build path - the result of this is never written to disk as a
-    shipped sprite.
+    trim/tertiary colours so the UI can show what a given colour scheme
+    would look like. Never used by the real build path - the result of
+    this is never written to disk as a shipped sprite.
 
-    remap_preview already classifies pixels using project's catch tolerances
-    (so this preview matches what the real build will catch); the
-    dithering step that follows is passed tolerance=0 (its default) since
-    there's nothing left for it to (re)classify - every pixel remap_preview
-    decided to catch has already been recoloured to the scheme's colour,
-    not the raw reference shade dither_frame_by_algorithm's bias looks for.
+    When `dither` is True, this dithers *first* - rendering through the
+    exact same render_layer_frame path the real build uses (raw reference
+    shades, zone-constrained quantisation) - then recolours the result by
+    direct index lookup (recolour_dithered_zones), instead of recolouring
+    first and dithering after. This mirrors what the engine itself does at
+    runtime: it recolours an already-dithered shipped sprite by index, it
+    never dithers a recoloured one. Recolouring first would collapse the
+    zone's natural EEVEE gradient into flat per-shade bands before
+    dithering had anything left to diffuse error across, which made this
+    preview's dithering visibly less detailed than what actually ships -
+    confirmed directly: the same frame had 51 distinct colours rendered the
+    real way vs only 32 recolour-first.
+
+    When `dither` is False (the fast, responsive preview), there's no
+    quantised index yet to look up - the source is still smooth, unquantised
+    EEVEE colour - so this still uses remap_preview's distance-based
+    classification, with project's catch tolerances applied exactly as the
+    real build would catch them.
     """
     is_static = layer.kind == "static"
-    cache_key = (layer.sprite_dir, direction, scheme.trim_colour, scheme.tertiary_colour) if is_static else None
+    cache_key = (layer.sprite_dir, direction, scheme.trim_colour, scheme.tertiary_colour, dither) if is_static else None
     if cache is not None and cache_key is not None and cache_key in cache:
         return cache[cache_key]
 
-    img = _load_layer_source(project, layer, direction, frame)
-    remapped = remap_preview(
-        img,
-        scheme.trim_colour,
-        scheme.tertiary_colour,
-        trim_tolerance=project.trim_catch_tolerance,
-        tertiary_tolerance=project.tertiary_catch_tolerance,
-    )
-    result = dither_frame_by_algorithm(remapped, layer.dither_algorithm, strength=layer.dither_strength) if dither else remapped
+    if dither:
+        dithered = render_layer_frame(project, layer, direction, frame, dither=True, cache=cache)
+        result = recolour_dithered_zones(dithered, scheme.trim_colour, scheme.tertiary_colour)
+    else:
+        img = _load_layer_source(project, layer, direction, frame)
+        result = remap_preview(
+            img,
+            scheme.trim_colour,
+            scheme.tertiary_colour,
+            trim_tolerance=project.trim_catch_tolerance,
+            tertiary_tolerance=project.tertiary_catch_tolerance,
+        )
 
     if cache is not None and cache_key is not None:
         cache[cache_key] = result
