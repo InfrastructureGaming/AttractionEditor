@@ -249,6 +249,13 @@ def custom_ride_manifest(project: RideProject) -> dict:
     matching the engine's own fallback when "ratings" is absent entirely,
     so writing them is behaviourally identical to omitting the block, just
     one consistent code path instead of a conditional.
+
+    "footprint" is likewise always written (never omitted) - it selects
+    which TrackElemType CustomRideLoader.cpp registers the ride's
+    StartTrackPiece as. base_footprint_width/length default to 6x6, matching
+    every custom ride's behaviour before this field existed (FlatRideGenericRTD
+    was hardcoded to TrackElemType::flatTrack6x6), so writing the default is
+    behaviourally identical to omitting it.
     """
     manifest: dict = {
         "name": project.name,
@@ -257,6 +264,10 @@ def custom_ride_manifest(project: RideProject) -> dict:
             "excitement": project.rating_excitement,
             "intensity": project.rating_intensity,
             "nausea": project.rating_nausea,
+        },
+        "footprint": {
+            "width": project.base_footprint_width,
+            "length": project.base_footprint_length,
         },
     }
     if project.description:

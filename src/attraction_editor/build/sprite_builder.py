@@ -5,6 +5,7 @@ feedback_sprite_packaging.md."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import struct
 import subprocess
@@ -30,6 +31,25 @@ _FINISHED_RE = re.compile(r"Finished building graphics repository with (\d+) ima
 
 class SpriteBuildError(RuntimeError):
     pass
+
+
+def _car_manifest_path(raw_path: str, project_dir: Path, tmp_dir_path: Path) -> str:
+    """Return `raw_path` (a car's frame file, normally project_dir-relative -
+    see model.project.CarConfig - but possibly absolute: legacy project data,
+    or a sprite folder picked from outside project_dir) re-expressed relative
+    to `tmp_dir_path`, the manifest's own directory.
+
+    openrct2-cli resolves every manifest path by joining it directly onto the
+    manifest file's directory as plain strings - it has no concept of an
+    absolute path overriding that join, so handing it an absolute path
+    doesn't make the CLI use it directly, it gets concatenated onto
+    tmp_dir_path just like anything else, producing a bogus nested path that
+    fails with "libpng error: Not a PNG file" - this was a real, confirmed
+    build failure, not a hypothetical. The only thing that reliably works
+    regardless of how `raw_path` was originally stored is computing the
+    actual relative path from tmp_dir_path to the real file location."""
+    absolute = project_dir / raw_path  # a no-op when raw_path is already absolute - pathlib's `/` drops the LHS
+    return os.path.relpath(absolute, tmp_dir_path).replace("\\", "/")
 
 
 @dataclass
@@ -100,8 +120,11 @@ def build_images_dat(
 
     # Create tmp_dir INSIDE project_dir so the CLI can reach both the
     # composited structure files and the original car files via relative
-    # paths. The CLI always resolves manifest paths relative to the manifest
-    # file, so absolute paths don't work; ../car_path steps back up one level.
+    # paths. The CLI always resolves manifest paths by joining them onto the
+    # manifest file's own directory as plain strings - an absolute path in
+    # the manifest doesn't override that join, it just gets concatenated
+    # onto it - so every path written into the manifest, car or structure,
+    # must actually be relative to tmp_dir_path (see _car_manifest_path).
     with tempfile.TemporaryDirectory(dir=project.project_dir) as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
 
@@ -120,12 +143,12 @@ def build_images_dat(
             e["path"] = str(Path(entry["path"]).relative_to(tmp_dir_path)).replace("\\", "/")
             rel_structure.append(e)
 
-        # Car paths: one level up from tmp_dir lands in project_dir where
-        # the original car frames live.
+        # Car paths: re-expressed relative to tmp_dir, wherever the original
+        # car frames actually live (normally one level up, in project_dir).
         rel_car = []
         for entry in car_entries:
             e = dict(entry)
-            e["path"] = "../" + entry["path"]
+            e["path"] = _car_manifest_path(entry["path"], project.project_dir, tmp_dir_path)
             rel_car.append(e)
 
         tmp_manifest = tmp_dir_path / MANIFEST_FILENAME

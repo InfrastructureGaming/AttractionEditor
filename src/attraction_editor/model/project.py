@@ -177,19 +177,32 @@ class RideProject:
     # CustomRideLoader.cpp's own ride-registration overrides, separate from
     # anything in object.json/the .parkobj. build_cost is whole pounds, 0 =
     # no override (engine keeps FlatRideGenericRTD's own default cost).
-    # rating_* are whole numbers 0-9 (per CustomRideLoader.cpp's own
-    # documented range) - default 3/2/1 matches the engine's own fallback
-    # when "ratings" is absent entirely, so leaving these untouched is
-    # equivalent to omitting the override, not an arbitrary placeholder.
+    # rating_* are 0-9 with up to 2 decimal places (RideRating_t is a
+    # fixed16_2dp - see CustomRideLoader.cpp's toRideRating) - default
+    # 3.0/2.0/1.0 matches the engine's own fallback when "ratings" is absent
+    # entirely, so leaving these untouched is equivalent to omitting the
+    # override, not an arbitrary placeholder.
     build_cost: int = 0
-    rating_excitement: int = 3
-    rating_intensity: int = 2
-    rating_nausea: int = 1
+    rating_excitement: float = 3.0
+    rating_intensity: float = 2.0
+    rating_nausea: float = 1.0
     output_name: str = ""
     deploy_dir: str | None = None
     openrct2_cli_path: str | None = None
+    # The ride's reserved land footprint in game tiles - written into
+    # manifest.json (see build/object_json.py's custom_ride_manifest) so
+    # CustomRideLoader.cpp can select the matching TrackElemType at ride
+    # registration. Defaults to 6x6, matching every custom ride's behaviour
+    # before this field existed (FlatRideGenericRTD was hardcoded to
+    # TrackElemType::flatTrack6x6). Bounded by kMaxSequencesPerPiece - the
+    # engine's own hard cap on tiles per track piece (TrackElementDescriptor.h)
+    # - not an arbitrary tool-side limit.
+    base_footprint_width: int = 6
+    base_footprint_length: int = 6
 
     project_dir: Path | None = field(default=None, compare=False)
+
+    MAX_FOOTPRINT_TILES = 64
 
     def __post_init__(self) -> None:
         if len(self.anchors) != DIRECTIONS:
@@ -198,6 +211,17 @@ class RideProject:
             raise ValueError("RideProject requires at least one layer")
         if not self.colour_schemes:
             raise ValueError("RideProject requires at least one colour scheme")
+        if self.base_footprint_width < 1 or self.base_footprint_length < 1:
+            raise ValueError(
+                f"base_footprint_width/length must each be >= 1, got "
+                f"{self.base_footprint_width}x{self.base_footprint_length}"
+            )
+        if self.base_footprint_width * self.base_footprint_length > self.MAX_FOOTPRINT_TILES:
+            raise ValueError(
+                f"base footprint {self.base_footprint_width}x{self.base_footprint_length} "
+                f"({self.base_footprint_width * self.base_footprint_length} tiles) exceeds the "
+                f"engine's {self.MAX_FOOTPRINT_TILES}-tile cap per track piece"
+            )
         for layer in self.layers:
             if layer.kind not in LAYER_KINDS:
                 raise ValueError(f"Layer {layer.name!r} has invalid kind {layer.kind!r}, expected one of {LAYER_KINDS}")

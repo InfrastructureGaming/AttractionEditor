@@ -43,8 +43,20 @@ class PreviewWidget(QWidget):
 
         pixmap = pil_to_pixmap(image)
         self._pixmap_item = self.scene.addPixmap(pixmap)
-        self.scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
-        self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.refit_view()
+
+    def refit_view(self) -> None:
+        """Resize the scene/view to fit everything currently shown - the
+        pixmap plus any overlay items added since set_image(). Callers that
+        add an overlay item potentially larger than the pixmap itself (e.g.
+        AnchorEditorPanel's footprint grid, which deliberately extends past
+        the canvas to reveal clipping) must call this again after add_overlay_item()
+        - set_image() alone only knows about the pixmap's own size."""
+        rect = self.scene.itemsBoundingRect()
+        if rect.isEmpty():
+            return
+        self.scene.setSceneRect(rect)
+        self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
     def clear(self) -> None:
         """Clear the scene entirely (no pixmap, no overlays)."""

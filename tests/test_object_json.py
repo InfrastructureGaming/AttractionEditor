@@ -436,6 +436,42 @@ def test_custom_ride_manifest_includes_custom_ratings(tmp_path):
     assert manifest["ratings"] == {"excitement": 7, "intensity": 6, "nausea": 4}
 
 
+def test_custom_ride_manifest_ratings_preserve_two_decimal_places(tmp_path):
+    """RideRating_t is a fixed16_2dp - CustomRideLoader.cpp's toRideRating
+    splits whatever decimal value is written here, so the manifest must
+    carry the fractional part through untruncated."""
+    project = make_synthetic_project(tmp_path)
+    project.rating_excitement = 6.55
+    project.rating_intensity = 4.25
+    project.rating_nausea = 2.10
+
+    manifest = custom_ride_manifest(project)
+
+    assert manifest["ratings"] == {"excitement": 6.55, "intensity": 4.25, "nausea": 2.1}
+
+
+def test_custom_ride_manifest_footprint_default_matches_engine_fallback(tmp_path):
+    """Untouched base_footprint_width/length must be behaviourally identical
+    to omitting "footprint" entirely - CustomRideLoader.cpp falls back to
+    TrackElemType::flatTrack6x6, every custom ride's footprint before this
+    field existed."""
+    project = make_synthetic_project(tmp_path)
+
+    manifest = custom_ride_manifest(project)
+
+    assert manifest["footprint"] == {"width": 6, "length": 6}
+
+
+def test_custom_ride_manifest_includes_custom_footprint(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    project.base_footprint_width = 1
+    project.base_footprint_length = 4
+
+    manifest = custom_ride_manifest(project)
+
+    assert manifest["footprint"] == {"width": 1, "length": 4}
+
+
 def test_custom_ride_manifest_omits_cost_when_zero(tmp_path):
     """CustomRideLoader.cpp only applies a build-cost override when cost > 0
     - 0 must mean "use the engine's own default", not "free"."""

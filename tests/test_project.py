@@ -323,6 +323,62 @@ def test_ride_object_metadata_round_trips_through_save_and_load(tmp_path: Path):
     assert loaded.rating_nausea == 4
 
 
+def test_base_footprint_defaults_to_6x6(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+
+    assert project.base_footprint_width == 6
+    assert project.base_footprint_length == 6
+
+
+def test_base_footprint_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.base_footprint_width = 1
+    project.base_footprint_length = 4
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    loaded = type(project).load(path)
+
+    assert loaded.base_footprint_width == 1
+    assert loaded.base_footprint_length == 4
+
+
+def test_base_footprint_rejects_dimensions_below_one(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data["base_footprint_width"] = 0
+
+    with pytest.raises(ValueError, match="must each be >= 1"):
+        RideProject(**{**data, "anchors": project.anchors, "layers": project.layers})
+
+
+def test_base_footprint_rejects_more_than_64_tiles(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data["base_footprint_width"] = 8
+    data["base_footprint_length"] = 9  # 72 tiles - over the engine's 64-tile cap
+
+    with pytest.raises(ValueError, match="exceeds the engine's 64-tile cap"):
+        RideProject(**{**data, "anchors": project.anchors, "layers": project.layers})
+
+
+def test_load_back_compat_for_projects_without_base_footprint(tmp_path: Path):
+    """An old project file saved before this feature existed has no
+    base_footprint_width/length keys - must load with the 6x6 default that
+    matches every custom ride's behaviour before this field existed."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data.pop("base_footprint_width")
+    data.pop("base_footprint_length")
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.base_footprint_width == 6
+    assert loaded.base_footprint_length == 6
+
+
 def test_load_back_compat_for_projects_without_ride_object_metadata(tmp_path: Path):
     """An old project file saved before this feature existed has none of
     these keys - must load with defaults, not error."""

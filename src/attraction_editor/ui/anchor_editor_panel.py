@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QBrush, QColor, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QGraphicsItem,
     QLabel,
     QSpinBox,
+    QStyleOptionGraphicsItem,
     QVBoxLayout,
     QWidget,
 )
@@ -61,6 +62,70 @@ class _CrosshairItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
 
+def _footprint_grid_lines(width: int, length: int) -> list[tuple[QPointF, QPointF, bool]]:
+    """Every tile-boundary line segment for a `width` x `length` isometric
+    tile grid, in local coordinates centered on the grid's own geometric
+    middle (so the item can be positioned at the same pixel as the anchor's
+    origin point - see anchor_to_origin - matching PaintGenericRotatingStructure's
+    own centered-on-the-plot convention, GenericFlatRide.cpp).
+
+    Pixel math verified against the engine's own projection (world/MapLimits.h's
+    kCoordsXYStep=32, Viewport.cpp's Translate3DTo2DWithZ: screenX = y-x,
+    screenY = (x+y)/2, 1:1 with screen pixels, no extra scale factor): moving
+    one tile along the `width` axis is screen delta (-32, 16); along `length`
+    is (32, 16). vertex(row, col) = top + row*rowStep + col*colStep, where
+    `top` is the grid's row=0/col=0 corner relative to its own center.
+
+    Returns (start, end, is_outer_edge) - is_outer_edge marks the 4 segments
+    forming the outer boundary (row/col at 0 or its max), drawn brighter than
+    the interior per-tile gridlines.
+    """
+    row_step = QPointF(-32, 16)
+    col_step = QPointF(32, 16)
+    top = QPointF((width - length) * 16, -(width + length) * 8)
+
+    def vertex(row: int, col: int) -> QPointF:
+        return QPointF(top.x() + row * row_step.x() + col * col_step.x(), top.y() + row * row_step.y() + col * col_step.y())
+
+    lines: list[tuple[QPointF, QPointF, bool]] = []
+    for row in range(width + 1):
+        lines.append((vertex(row, 0), vertex(row, length), row in (0, width)))
+    for col in range(length + 1):
+        lines.append((vertex(0, col), vertex(width, col), col in (0, length)))
+    return lines
+
+
+class _FootprintGridItem(QGraphicsItem):
+    """Pixel-accurate isometric outline of the ride's reserved land footprint
+    (RideProject.base_footprint_width/length), centered on the same origin
+    point as the anchor crosshair. Outline-only - the actual floor/fence/
+    support art is drawn by the engine at runtime (see build/object_json.py's
+    custom_ride_manifest docstring); this exists purely so an artist can see
+    whether their structure's render extends past the reserved plot."""
+
+    def __init__(self, width: int, length: int) -> None:
+        super().__init__()
+        self._lines = _footprint_grid_lines(width, length)
+        self.setZValue(5)  # above the pixmap, below the crosshair (zValue 10)
+
+        xs = [p.x() for line in self._lines for p in line[:2]]
+        ys = [p.y() for line in self._lines for p in line[:2]]
+        margin = 2
+        self._bounding_rect = QRectF(
+            min(xs) - margin, min(ys) - margin, max(xs) - min(xs) + 2 * margin, max(ys) - min(ys) + 2 * margin
+        )
+
+    def boundingRect(self) -> QRectF:
+        return self._bounding_rect
+
+    def paint(self, painter, option: QStyleOptionGraphicsItem, widget=None) -> None:
+        outer_pen = QPen(QColor(0, 255, 255, 220), 1)
+        inner_pen = QPen(QColor(0, 255, 255, 110), 1)
+        for start, end, is_outer in self._lines:
+            painter.setPen(outer_pen if is_outer else inner_pen)
+            painter.drawLine(start, end)
+
+
 class AnchorEditorPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -76,9 +141,18 @@ class AnchorEditorPanel(QWidget):
         self.y_spin = QSpinBox()
         self.y_spin.setRange(-2000, 2000)
 
+        self.show_grid_check = QCheckBox("Show footprint grid")
+        self.show_grid_check.setChecked(True)
+        self.show_grid_check.setToolTip(
+            "Pixel-accurate isometric outline of the ride's reserved land footprint\n"
+            "(Project section's Footprint width/length), centered on this direction's\n"
+            "anchor - use it to check whether the structure's render clips past the plot."
+        )
+
         form = QFormLayout()
         form.addRow("Origin X", self.x_spin)
         form.addRow("Origin Y", self.y_spin)
+        form.addRow("", self.show_grid_check)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -90,6 +164,7 @@ class AnchorEditorPanel(QWidget):
 
         self.x_spin.valueChanged.connect(self._on_spin_changed)
         self.y_spin.valueChanged.connect(self._on_spin_changed)
+        self.show_grid_check.toggled.connect(self.reload)
 
         self.setEnabled(False)
 
@@ -135,12 +210,19 @@ class AnchorEditorPanel(QWidget):
         else:
             self.preview_widget.clear()
 
+        anchor = self.project.anchors[direction]
+        x, y = anchor_to_origin(anchor)
+
+        if self.show_grid_check.isChecked():
+            grid = _FootprintGridItem(self.project.base_footprint_width, self.project.base_footprint_length)
+            grid.setPos(QPointF(x, y))
+            self.preview_widget.add_overlay_item(grid)
+
         self.crosshair = _CrosshairItem(self._on_crosshair_moved)
         self.preview_widget.add_overlay_item(self.crosshair)
 
-        anchor = self.project.anchors[direction]
-        x, y = anchor_to_origin(anchor)
         self._set_position(x, y)
+        self.preview_widget.refit_view()
 
     def _set_position(self, x: float, y: float) -> None:
         self._updating = True

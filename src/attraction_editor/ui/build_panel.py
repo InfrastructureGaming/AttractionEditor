@@ -15,6 +15,7 @@ from attraction_editor.build.object_json import write_object_json
 from attraction_editor.build.package import deploy_parkobj, package_parkobj, write_custom_ride_manifest
 from attraction_editor.build.sprite_builder import build_images_dat
 from attraction_editor.model.project import RideProject
+from attraction_editor.sprites.scanner import FrameSetError, scan_project
 from attraction_editor.sprites.validate import validate_project
 
 
@@ -35,6 +36,14 @@ class _BuildWorker(QObject):
                     self.log.emit(f"  [{issue.severity.upper()}] {name}: {issue.message}")
             if any(not report.ok for report in reports.values()):
                 self.finished.emit(False, "Validation found errors - see log above")
+                return
+
+            self.log.emit("Scanning frame sets for completeness...")
+            try:
+                scan_project(self.project)
+            except FrameSetError as exc:
+                self.log.emit(f"  [ERROR] {exc}")
+                self.finished.emit(False, "Frame set scan found errors - see log above")
                 return
 
             self.log.emit("Compositing layers (remap + per-layer dithering)...")

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -57,6 +58,23 @@ class ProjectPanel(QWidget):
             "no need to split this into above/below halves yourself."
         )
 
+        # Reserved land footprint in game tiles - written into manifest.json
+        # (see build/object_json.py's custom_ride_manifest) so
+        # CustomRideLoader.cpp can select the matching TrackElemType.
+        # Validated here against the engine's own kMaxSequencesPerPiece cap
+        # (64 tiles per track piece) rather than RideProject's constructor-
+        # time check, since an invalid combination must never reach the
+        # model at all - the user is mid-edit, one spinbox at a time, and
+        # RideProject only validates at construction, not on attribute
+        # assignment.
+        self.footprint_width_spin = QSpinBox()
+        self.footprint_width_spin.setRange(1, RideProject.MAX_FOOTPRINT_TILES)
+        self.footprint_length_spin = QSpinBox()
+        self.footprint_length_spin.setRange(1, RideProject.MAX_FOOTPRINT_TILES)
+        self.footprint_error_label = QLabel("")
+        self.footprint_error_label.setStyleSheet("color: red;")
+        self.footprint_error_label.setWordWrap(True)
+
         self.output_name_edit = QLineEdit()
         self.deploy_dir_edit, deploy_row = _path_field(directory=True)
         self.openrct2_cli_edit, cli_row = _path_field(directory=False)
@@ -69,6 +87,9 @@ class ProjectPanel(QWidget):
         form.addRow("Sequence length (frames)", self.frames_per_dir_spin)
         form.addRow("Sprite width", self.sprite_width_spin)
         form.addRow("Sprite height", self.sprite_height_spin)
+        form.addRow("Footprint width (tiles)", self.footprint_width_spin)
+        form.addRow("Footprint length (tiles)", self.footprint_length_spin)
+        form.addRow("", self.footprint_error_label)
         form.addRow("Output name", self.output_name_edit)
         form.addRow("Deploy folder", deploy_row)
         form.addRow("openrct2-cli path", cli_row)
@@ -85,6 +106,8 @@ class ProjectPanel(QWidget):
         self.frames_per_dir_spin.valueChanged.connect(self._on_simple_field_changed)
         self.sprite_width_spin.valueChanged.connect(self._on_simple_field_changed)
         self.sprite_height_spin.valueChanged.connect(self._on_simple_field_changed)
+        self.footprint_width_spin.valueChanged.connect(self._on_simple_field_changed)
+        self.footprint_length_spin.valueChanged.connect(self._on_simple_field_changed)
         self.output_name_edit.textChanged.connect(self._on_simple_field_changed)
         self.deploy_dir_edit.textChanged.connect(self._on_simple_field_changed)
         self.openrct2_cli_edit.textChanged.connect(self._on_simple_field_changed)
@@ -103,6 +126,9 @@ class ProjectPanel(QWidget):
             self.frames_per_dir_spin.setValue(project.frames_per_dir)
             self.sprite_width_spin.setValue(project.sprite_width)
             self.sprite_height_spin.setValue(project.sprite_height)
+            self.footprint_width_spin.setValue(project.base_footprint_width)
+            self.footprint_length_spin.setValue(project.base_footprint_length)
+            self.footprint_error_label.setText("")
             self.output_name_edit.setText(project.output_name)
             self.deploy_dir_edit.setText(project.deploy_dir or "")
             self.openrct2_cli_edit.setText(project.openrct2_cli_path or "")
@@ -120,6 +146,20 @@ class ProjectPanel(QWidget):
         self.project.frames_per_dir = self.frames_per_dir_spin.value()
         self.project.sprite_width = self.sprite_width_spin.value()
         self.project.sprite_height = self.sprite_height_spin.value()
+
+        width = self.footprint_width_spin.value()
+        length = self.footprint_length_spin.value()
+        tiles = width * length
+        if tiles > RideProject.MAX_FOOTPRINT_TILES:
+            self.footprint_error_label.setText(
+                f"{width}x{length} = {tiles} tiles exceeds the engine's "
+                f"{RideProject.MAX_FOOTPRINT_TILES}-tile limit per track piece - not saved."
+            )
+        else:
+            self.footprint_error_label.setText("")
+            self.project.base_footprint_width = width
+            self.project.base_footprint_length = length
+
         self.project.output_name = self.output_name_edit.text()
         self.project.deploy_dir = self.deploy_dir_edit.text() or None
         self.project.openrct2_cli_path = self.openrct2_cli_edit.text() or None

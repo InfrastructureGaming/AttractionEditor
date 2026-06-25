@@ -86,9 +86,21 @@ def test_draw_order_spin_clamped_to_valid_range(qtbot, tmp_path):
 
 def test_rating_spins_clamped_to_valid_range(qtbot, tmp_path):
     panel, _project = _panel_with_project(qtbot, tmp_path)
-    assert panel.rating_excitement_spin.maximum() == 9
-    assert panel.rating_intensity_spin.maximum() == 9
-    assert panel.rating_nausea_spin.maximum() == 9
+    assert panel.rating_excitement_spin.maximum() == 9.99
+    assert panel.rating_intensity_spin.maximum() == 9.99
+    assert panel.rating_nausea_spin.maximum() == 9.99
+
+
+def test_rating_spins_support_two_decimal_places(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+
+    panel.rating_excitement_spin.setValue(6.55)
+    panel.rating_intensity_spin.setValue(4.25)
+    panel.rating_nausea_spin.setValue(2.10)
+
+    assert project.rating_excitement == 6.55
+    assert project.rating_intensity == 4.25
+    assert project.rating_nausea == 2.10
 
 
 def test_authors_field_parses_comma_separated_list(qtbot, tmp_path):

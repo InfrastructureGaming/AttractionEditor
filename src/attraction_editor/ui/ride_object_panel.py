@@ -72,19 +72,24 @@ class RideObjectPanel(QWidget):
             "type's own default build cost instead."
         )
 
-        # 0-9 each, matching CustomRideLoader.cpp's own documented range for
-        # these manifest.json overrides. Defaults (3/2/1) match the engine's
-        # own fallback when "ratings" is absent entirely, for reference: the
-        # vanilla "Twist" ride (a similar gentle spinning ride) actually
-        # rates around excitement 1.1/intensity 1.0/nausea 1.9 on the
-        # engine's own finer-grained scale - these whole-number overrides
-        # are coarser, but the same rough ballpark is a reasonable target.
-        self.rating_excitement_spin = QSpinBox()
-        self.rating_excitement_spin.setRange(0, 9)
-        self.rating_intensity_spin = QSpinBox()
-        self.rating_intensity_spin.setRange(0, 9)
-        self.rating_nausea_spin = QSpinBox()
-        self.rating_nausea_spin.setRange(0, 9)
+        # 0-9 each with up to 2 decimal places, matching RideRating_t's own
+        # fixed16_2dp precision (CustomRideLoader.cpp's toRideRating).
+        # Defaults (3/2/1) match the engine's own fallback when "ratings" is
+        # absent entirely, for reference: the vanilla "Twist" ride (a similar
+        # gentle spinning ride) actually rates around excitement 1.1/
+        # intensity 1.0/nausea 1.9 on the engine's own finer-grained scale.
+        self.rating_excitement_spin = QDoubleSpinBox()
+        self.rating_excitement_spin.setRange(0.0, 9.99)
+        self.rating_excitement_spin.setDecimals(2)
+        self.rating_excitement_spin.setSingleStep(0.01)
+        self.rating_intensity_spin = QDoubleSpinBox()
+        self.rating_intensity_spin.setRange(0.0, 9.99)
+        self.rating_intensity_spin.setDecimals(2)
+        self.rating_intensity_spin.setSingleStep(0.01)
+        self.rating_nausea_spin = QDoubleSpinBox()
+        self.rating_nausea_spin.setRange(0.0, 9.99)
+        self.rating_nausea_spin.setDecimals(2)
+        self.rating_nausea_spin.setSingleStep(0.01)
 
         form = QFormLayout()
         form.addRow("Car tab offset", self.car_tab_offset_spin)

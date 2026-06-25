@@ -83,7 +83,7 @@ class LayersPanel(QWidget):
         reorder_buttons.addWidget(down_btn)
 
         self.name_edit = QLineEdit()
-        self.sprite_dir_edit, sprite_dir_row = _path_field()
+        self.sprite_dir_edit, sprite_dir_row = _path_field(self._project_dir)
         self.kind_combo = QComboBox()
         self.kind_combo.addItems(_KIND_ORDER)
         self.algorithm_combo = QComboBox()
@@ -107,7 +107,7 @@ class LayersPanel(QWidget):
 
         self.car_list = QListWidget()
         self.car_name_edit = QLineEdit()
-        self.car_sprite_dir_edit, car_dir_row = _path_field()
+        self.car_sprite_dir_edit, car_dir_row = _path_field(self._project_dir)
         add_car_btn = QPushButton("Add car")
         remove_car_btn = QPushButton("Remove car")
 
@@ -154,6 +154,9 @@ class LayersPanel(QWidget):
         remove_car_btn.clicked.connect(self._on_remove_car)
 
         self.setEnabled(False)
+
+    def _project_dir(self) -> Path | None:
+        return self.project.project_dir if self.project is not None else None
 
     def set_preview_widget(self, preview_widget: PreviewWidget) -> None:
         self.preview_widget = preview_widget
@@ -350,16 +353,39 @@ class LayersPanel(QWidget):
         self.projectChanged.emit()
 
 
-def _path_field() -> tuple[QLineEdit, QWidget]:
-    """A QLineEdit + "Browse..." button packed into a single row widget."""
+def _path_field(project_dir_getter: Callable[[], Path | None] | None = None) -> tuple[QLineEdit, QWidget]:
+    """A QLineEdit + "Browse..." button packed into a single row widget.
+
+    `project_dir_getter`, if given, is consulted on every Browse click so the
+    dialog starts from (and the result is stored relative to) the current
+    project's directory - Layer.sprite_dir/CarConfig.sprite_dir are always
+    project_dir-relative (see model.project.Layer/CarConfig), so storing the
+    dialog's raw absolute pick verbatim corrupts every downstream path build
+    (sprite_builder.py's "../" car-path prefixing assumes a relative path and
+    silently produces a nonsense doubled path otherwise - this was a real,
+    confirmed bug, not a hypothetical). Picking a folder outside project_dir
+    falls back to storing the absolute path, since there's no relative path
+    that would make sense."""
     edit = QLineEdit()
     browse = QPushButton("Browse...")
 
     def on_browse() -> None:
-        start = edit.text() or str(Path.cwd())
+        project_dir = project_dir_getter() if project_dir_getter else None
+        current_text = edit.text()
+        if current_text:
+            start = str(Path(project_dir) / current_text) if project_dir is not None and not Path(current_text).is_absolute() else current_text
+        else:
+            start = str(project_dir) if project_dir is not None else str(Path.cwd())
+
         chosen = QFileDialog.getExistingDirectory(edit, "Select folder", start)
         if chosen:
-            edit.setText(chosen)
+            text = chosen
+            if project_dir is not None:
+                try:
+                    text = str(Path(chosen).resolve().relative_to(Path(project_dir).resolve())).replace("\\", "/")
+                except ValueError:
+                    pass  # chosen folder is outside project_dir - keep the absolute path
+            edit.setText(text)
             # setText() alone doesn't fire editingFinished (only Enter/focus-
             # loss does) - emit it explicitly so Browse-picked paths commit
             # to the model the same way typing-and-pressing-Enter does.

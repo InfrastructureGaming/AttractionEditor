@@ -307,6 +307,30 @@ def dither_frame_bayer(
 _ATKINSON_OFFSETS = ((1, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (0, 2))
 
 
+@lru_cache(maxsize=8)
+def _atkinson_colour_cache(allowed_indices: frozenset[int]) -> dict[tuple[int, int, int], tuple[float, float, float]]:
+    """A nearest-palette-colour memo, one dict per distinct allowed_indices
+    set, returned by reference and reused across every dither_frame_atkinson
+    call for the lifetime of the process (lru_cache hands back the same dict
+    object every time, so callers mutating it in place is the intended use).
+
+    The error-diffusion loop below has a genuine serial dependency (each
+    pixel's diffused error feeds the next), so it can't be vectorised across
+    the whole image the way dither_frame's Floyd-Steinberg path was - but the
+    per-pixel nearest-palette search inside that loop has no such dependency
+    on *which* colour it's searching for, only on the (rounded) RGB value.
+    A rendered frame's distinct colours number in the hundreds to low
+    thousands, not one per pixel - and an animated layer's hundreds of
+    frames overwhelmingly reuse the same handful of shaded tones - so memoing
+    the search by rounded RGB turns the vast majority of pixels into an O(1)
+    dict lookup instead of an O(len(allowed_indices)) numpy distance search,
+    with the full search only ever run once per distinct colour actually
+    encountered. Independent of `strength` (nearest-colour search doesn't
+    depend on it), so the same cache benefits every strength used with a
+    given allowed_indices set."""
+    return {}
+
+
 def dither_frame_atkinson(
     img: Image.Image, *, strength: int = 32, allowed_indices: frozenset[int] | None = None
 ) -> Image.Image:
@@ -331,24 +355,47 @@ def dither_frame_atkinson(
     palette = load_standard_palette()
     valid_indices = sorted(_resolve_allowed(allowed_indices))
     valid_palette = np.array([palette[i] for i in valid_indices], dtype=np.float64)
+    cache = _atkinson_colour_cache(frozenset(valid_indices))
 
-    arr = np.asarray(rgba.convert("RGB"), dtype=np.float64).copy()
-    h, w = arr.shape[:2]
+    arr_np = np.asarray(rgba.convert("RGB"), dtype=np.float64)
+    h, w = arr_np.shape[:2]
     diffuse_fraction = min(1.0, max(0.0, strength / 32.0)) / 8.0
 
+    # Plain Python nested lists for the hot loop: numpy scalar indexing
+    # (arr[y, x]) carries per-element dispatch/boxing overhead that adds up
+    # over tens of thousands of pixels - a raw Python list/float is cheaper
+    # to read and mutate here even though the loop itself can't be
+    # vectorised (each pixel's diffused error feeds pixels not yet visited).
+    arr = arr_np.tolist()
+
     for y in range(h):
+        row = arr[y]
         for x in range(w):
-            old = arr[y, x].copy()
-            dists = np.sum((valid_palette - old) ** 2, axis=1)
-            nearest = valid_palette[int(np.argmin(dists))]
-            arr[y, x] = nearest
-            error = old - nearest
+            r, g, b = row[x]
+            key = (
+                0 if r <= 0.0 else (255 if r >= 255.0 else int(r + 0.5)),
+                0 if g <= 0.0 else (255 if g >= 255.0 else int(g + 0.5)),
+                0 if b <= 0.0 else (255 if b >= 255.0 else int(b + 0.5)),
+            )
+            nearest = cache.get(key)
+            if nearest is None:
+                dists = np.sum((valid_palette - key) ** 2, axis=1)
+                nearest = tuple(float(c) for c in valid_palette[int(np.argmin(dists))])
+                cache[key] = nearest
+            nr, ng, nb = nearest
+            row[x] = [nr, ng, nb]
+            er = (r - nr) * diffuse_fraction
+            eg = (g - ng) * diffuse_fraction
+            eb = (b - nb) * diffuse_fraction
             for dx, dy in _ATKINSON_OFFSETS:
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < w and 0 <= ny < h:
-                    arr[ny, nx] = arr[ny, nx] + error * diffuse_fraction
+                    neighbour = arr[ny][nx]
+                    neighbour[0] += er
+                    neighbour[1] += eg
+                    neighbour[2] += eb
 
-    result_rgb = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), mode="RGB")
+    result_rgb = Image.fromarray(np.clip(np.array(arr, dtype=np.float64), 0, 255).astype(np.uint8), mode="RGB")
     result = result_rgb.convert("RGBA")
     result.putalpha(alpha)
     return result
