@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Callable
 
 from attraction_editor.build.layers import build_composite_frames
+from attraction_editor.build.thumbnail import THUMBNAIL_FILENAME, render_thumbnail
 from attraction_editor.model.project import DIRECTIONS, RideProject
 from attraction_editor.sprites.manifest import THUMBNAIL_COUNT, build_manifest, manifest_image_count
+from attraction_editor.sprites.scanner import frame_path
 
 MANIFEST_FILENAME = "sprite_manifest.json"
 IMAGES_DAT_FILENAME = "images.dat"
@@ -129,7 +131,18 @@ def build_images_dat(
         tmp_dir_path = Path(tmp_dir)
 
         structure_dir = build_composite_frames(project, tmp_dir_path, dither=dither, on_progress=on_progress)
-        manifest_entries = build_manifest(project, structure_dir)
+
+        # Render the New Ride preview thumbnail: the author's image if set,
+        # otherwise composited structure frame 0 (dir 0). Either way it's
+        # fitted to 112x112 and built "raw" (see manifest/thumbnail), so the
+        # ride-picker preview renders correctly even for thumbnail-less projects.
+        thumb_source = (
+            project.project_dir / project.thumbnail_path
+            if project.thumbnail_path
+            else frame_path(structure_dir, 0, 0)
+        )
+        thumb_file = render_thumbnail(thumb_source, tmp_dir_path / THUMBNAIL_FILENAME)
+        manifest_entries = build_manifest(project, structure_dir, thumbnail_path=thumb_file)
 
         # Split at the structure/car boundary — riders are never dithered or composited.
         structure_count = THUMBNAIL_COUNT + DIRECTIONS * project.frames_per_dir

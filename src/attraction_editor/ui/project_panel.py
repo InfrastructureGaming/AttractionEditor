@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PIL import Image
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -23,7 +24,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from attraction_editor.build.thumbnail import THUMBNAIL_SIZE, fit_to_thumbnail
 from attraction_editor.model.project import RideProject
+from attraction_editor.ui.pil_qt import pil_to_pixmap
 
 RIDE_CATEGORIES = ["transport", "gentle", "rollercoaster", "thrill", "water", "shop"]
 
@@ -75,6 +78,17 @@ class ProjectPanel(QWidget):
         self.footprint_error_label.setStyleSheet("color: red;")
         self.footprint_error_label.setWordWrap(True)
 
+        # Preview thumbnail: the New Ride / construction-window icon. Optional -
+        # left blank, the build auto-generates one from structure frame 0 (see
+        # build/sprite_builder.py). The live preview shows exactly what the
+        # build will produce: the source fitted to 112x112 on transparent
+        # padding (see build/thumbnail.py).
+        self.thumbnail_edit, thumbnail_row = _path_field(directory=False)
+        self.thumbnail_preview = QLabel()
+        self.thumbnail_preview.setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+        self.thumbnail_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_preview.setStyleSheet("border: 1px solid palette(mid);")
+
         self.output_name_edit = QLineEdit()
         self.deploy_dir_edit, deploy_row = _path_field(directory=True)
         self.openrct2_cli_edit, cli_row = _path_field(directory=False)
@@ -90,6 +104,8 @@ class ProjectPanel(QWidget):
         form.addRow("Footprint width (tiles)", self.footprint_width_spin)
         form.addRow("Footprint length (tiles)", self.footprint_length_spin)
         form.addRow("", self.footprint_error_label)
+        form.addRow("Preview thumbnail", thumbnail_row)
+        form.addRow("", self.thumbnail_preview)
         form.addRow("Output name", self.output_name_edit)
         form.addRow("Deploy folder", deploy_row)
         form.addRow("openrct2-cli path", cli_row)
@@ -108,6 +124,7 @@ class ProjectPanel(QWidget):
         self.sprite_height_spin.valueChanged.connect(self._on_simple_field_changed)
         self.footprint_width_spin.valueChanged.connect(self._on_simple_field_changed)
         self.footprint_length_spin.valueChanged.connect(self._on_simple_field_changed)
+        self.thumbnail_edit.textChanged.connect(self._on_simple_field_changed)
         self.output_name_edit.textChanged.connect(self._on_simple_field_changed)
         self.deploy_dir_edit.textChanged.connect(self._on_simple_field_changed)
         self.openrct2_cli_edit.textChanged.connect(self._on_simple_field_changed)
@@ -129,11 +146,13 @@ class ProjectPanel(QWidget):
             self.footprint_width_spin.setValue(project.base_footprint_width)
             self.footprint_length_spin.setValue(project.base_footprint_length)
             self.footprint_error_label.setText("")
+            self.thumbnail_edit.setText(project.thumbnail_path or "")
             self.output_name_edit.setText(project.output_name)
             self.deploy_dir_edit.setText(project.deploy_dir or "")
             self.openrct2_cli_edit.setText(project.openrct2_cli_path or "")
         finally:
             self._loading = False
+        self._update_thumbnail_preview()
         self.setEnabled(True)
 
     def _on_simple_field_changed(self, *_args) -> None:
@@ -160,10 +179,43 @@ class ProjectPanel(QWidget):
             self.project.base_footprint_width = width
             self.project.base_footprint_length = length
 
+        # Stored as typed (relative to project_dir, or absolute): the build
+        # resolves both via project_dir / thumbnail_path, same as the car
+        # sprite-dir convention.
+        self.project.thumbnail_path = self.thumbnail_edit.text() or None
         self.project.output_name = self.output_name_edit.text()
         self.project.deploy_dir = self.deploy_dir_edit.text() or None
         self.project.openrct2_cli_path = self.openrct2_cli_edit.text() or None
+        self._update_thumbnail_preview()
         self.projectChanged.emit()
+
+    def _update_thumbnail_preview(self) -> None:
+        """Show the build's actual thumbnail output (source fitted to 112x112),
+        or a placeholder: (auto) when none is set - the build will derive one
+        from structure frame 0 - (missing)/(invalid) when the configured file
+        can't be loaded."""
+        self.thumbnail_preview.setToolTip("")
+        if self.project is None or not self.project.thumbnail_path:
+            self.thumbnail_preview.clear()
+            self.thumbnail_preview.setText("(auto)")
+            return
+
+        base = self.project.project_dir or Path.cwd()
+        source = base / self.project.thumbnail_path  # absolute thumbnail_path overrides base
+        if not source.exists():
+            self.thumbnail_preview.clear()
+            self.thumbnail_preview.setText("(missing)")
+            self.thumbnail_preview.setToolTip(f"Not found: {source}")
+            return
+        try:
+            with Image.open(source) as im:
+                fitted = fit_to_thumbnail(im)
+        except (OSError, ValueError) as exc:
+            self.thumbnail_preview.clear()
+            self.thumbnail_preview.setText("(invalid)")
+            self.thumbnail_preview.setToolTip(str(exc))
+            return
+        self.thumbnail_preview.setPixmap(pil_to_pixmap(fitted))
 
 
 def _path_field(directory: bool = False) -> tuple[QLineEdit, QWidget]:

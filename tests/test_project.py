@@ -88,6 +88,32 @@ def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
     assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
 
 
+def test_thumbnail_path_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.thumbnail_path = "Frames/thumb.png"
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+
+    loaded = type(project).load(path)
+
+    assert loaded.thumbnail_path == "Frames/thumb.png"
+
+
+def test_load_back_compat_for_projects_without_thumbnail_path(tmp_path: Path):
+    """A project saved before thumbnail_path existed has no such key - must load
+    with the default (None), not error."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data.pop("thumbnail_path")
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.thumbnail_path is None
+
+
 def test_empty_programs_round_trip(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.programs == []

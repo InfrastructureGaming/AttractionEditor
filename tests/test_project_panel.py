@@ -5,6 +5,8 @@ build/object_json.py's invalidation_bounds)."""
 
 from __future__ import annotations
 
+from PIL import Image
+
 from attraction_editor.ui.project_panel import ProjectPanel
 from tests.fixtures.synthetic import make_synthetic_project
 
@@ -100,6 +102,56 @@ def test_footprint_exceeding_64_tiles_shows_error_and_does_not_write(qtbot, tmp_
     # didn't, since 8x9 isn't - the model never holds an invalid combination.
     assert project.base_footprint_width == 8
     assert project.base_footprint_length == 6
+
+
+def test_thumbnail_path_loads_from_project(qtbot, tmp_path):
+    panel = ProjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.thumbnail_path = "thumb.png"
+
+    panel.set_project(project)
+
+    assert panel.thumbnail_edit.text() == "thumb.png"
+
+
+def test_editing_thumbnail_path_writes_to_project(qtbot, tmp_path):
+    panel = ProjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    panel.set_project(project)
+
+    panel.thumbnail_edit.setText("Frames/thumb.png")
+
+    assert project.thumbnail_path == "Frames/thumb.png"
+
+
+def test_blank_thumbnail_clears_to_none_with_auto_preview(qtbot, tmp_path):
+    panel = ProjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    panel.set_project(project)
+
+    panel.thumbnail_edit.setText("nonexistent.png")
+    assert project.thumbnail_path == "nonexistent.png"
+    assert panel.thumbnail_preview.text() == "(missing)"
+
+    panel.thumbnail_edit.setText("")
+    assert project.thumbnail_path is None
+    assert panel.thumbnail_preview.text() == "(auto)"
+
+
+def test_valid_thumbnail_file_renders_preview_pixmap(qtbot, tmp_path):
+    project = make_synthetic_project(tmp_path)
+    Image.new("RGBA", (200, 200), (255, 0, 0, 255)).save(project.project_dir / "thumb.png")
+
+    panel = ProjectPanel()
+    qtbot.addWidget(panel)
+    panel.set_project(project)
+
+    panel.thumbnail_edit.setText("thumb.png")
+
+    assert not panel.thumbnail_preview.pixmap().isNull()
 
 
 def test_footprint_error_clears_once_back_within_the_limit(qtbot, tmp_path):

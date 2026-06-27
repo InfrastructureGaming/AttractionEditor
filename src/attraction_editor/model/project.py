@@ -196,6 +196,17 @@ class RideProject:
     rating_excitement: float = 3.0
     rating_intensity: float = 2.0
     rating_nausea: float = 1.0
+    # Optional path (relative to project_dir, or absolute) to a source image
+    # used as the ride's preview thumbnail in the New Ride / construction
+    # window. Fitted to 112x112 and built as a flat ("raw" format) sprite at
+    # build time (see build/thumbnail.py + sprites/manifest.py) so it takes the
+    # engine's masked preview-draw path - feathered border, correctly clipped -
+    # instead of being a full-size animation frame cropped to its top-left
+    # corner (the long-standing reason custom-ride thumbnails rendered wrong).
+    # None = auto-generate the thumbnail from composited structure frame 0
+    # (direction 0) at build time, which still fixes the rendering, just
+    # without a hand-authored image.
+    thumbnail_path: str | None = None
     output_name: str = ""
     deploy_dir: str | None = None
     openrct2_cli_path: str | None = None
