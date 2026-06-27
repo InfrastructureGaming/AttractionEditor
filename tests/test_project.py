@@ -56,6 +56,38 @@ def test_programs_round_trip_through_save_and_load(tmp_path: Path):
     assert loaded.programs == project.programs
 
 
+def test_play_reverse_round_trips_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    programs = _make_programs()
+    programs[0].phases[2].play_reverse = True  # the "End" phase plays reversed
+    project.programs = programs
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+
+    loaded = type(project).load(path)
+
+    assert loaded.programs[0].phases[2].play_reverse is True
+    assert loaded.programs[0].phases[0].play_reverse is False  # unset stays default
+
+
+def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
+    """A project saved before play_reverse existed has no play_reverse key on
+    any phase - each must load with the default (False), not error."""
+    project = make_synthetic_project(tmp_path)
+    project.programs = _make_programs()
+    data = project.to_dict()
+    for program in data["programs"]:
+        for phase in program["phases"]:
+            phase.pop("play_reverse")
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
+
+
 def test_empty_programs_round_trip(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.programs == []

@@ -67,6 +67,15 @@ class AnimationPhase:
     reset_rotations_on_entry zeroes NumRotations when this phase is entered,
     giving it its own independent ride.rotations budget. Needed when a
     program has more than one repeat_until_rotations_complete phase.
+    play_reverse walks the same [frame_start, frame_start + frame_count) range
+    backwards (last frame first), so a single authored sprite range can drive
+    a motion and its inverse without doubling the image count - e.g. animate
+    restraints closing once, then a second phase plays that range reversed to
+    open them. The engine expands this into a descending TimeToSpriteMap at
+    object load (RideObject.cpp); the runtime playback is unchanged, it just
+    walks whatever order the map holds. Emitted as "playReverse" only when
+    True (see build/object_json.py); harmless on engines that predate reverse
+    support, which simply ignore the unknown key and play the range forward.
     """
 
     name: str
@@ -77,6 +86,7 @@ class AnimationPhase:
     repeat_until_rotations_complete: bool = False
     is_final_phase: bool = False
     reset_rotations_on_entry: bool = False
+    play_reverse: bool = False
 
 
 @dataclass

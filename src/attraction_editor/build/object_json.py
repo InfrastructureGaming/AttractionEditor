@@ -85,6 +85,8 @@ def flat_ride_animation_block(project: RideProject) -> dict | None:
                 phase_dict["isFinalPhase"] = True
             if phase.reset_rotations_on_entry:
                 phase_dict["resetRotationsOnEntry"] = True
+            if phase.play_reverse:
+                phase_dict["playReverse"] = True
             phases_json.append(phase_dict)
         programs_json.append({"phases": phases_json})
 

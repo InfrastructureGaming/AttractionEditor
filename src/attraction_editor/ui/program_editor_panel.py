@@ -81,6 +81,13 @@ class ProgramEditorPanel(QWidget):
         self.repeat_check = QCheckBox("Repeat until ride.rotations complete")
         self.final_check = QCheckBox("Final phase (ends program -> arriving)")
         self.reset_rotations_check = QCheckBox("Reset rotation count on entry")
+        self.reverse_check = QCheckBox("Play in reverse")
+        self.reverse_check.setToolTip(
+            "Play this phase's frame range backwards (last frame first), so one "
+            "authored sprite range can drive a motion and its inverse without "
+            "doubling the image count - e.g. reuse a 'restraints closing' range, "
+            "reversed, to open them."
+        )
 
         phase_form = QFormLayout()
         phase_form.addRow("Name", self.phase_name_edit)
@@ -91,6 +98,7 @@ class ProgramEditorPanel(QWidget):
         phase_form.addRow(self.repeat_check)
         phase_form.addRow(self.final_check)
         phase_form.addRow(self.reset_rotations_check)
+        phase_form.addRow(self.reverse_check)
 
         phase_box = QGroupBox("Phases")
         phase_layout = QVBoxLayout()
@@ -139,6 +147,7 @@ class ProgramEditorPanel(QWidget):
         self.repeat_check.toggled.connect(self._on_phase_field_changed)
         self.final_check.toggled.connect(self._on_phase_field_changed)
         self.reset_rotations_check.toggled.connect(self._on_phase_field_changed)
+        self.reverse_check.toggled.connect(self._on_phase_field_changed)
 
         self.setEnabled(False)
 
@@ -243,6 +252,7 @@ class ProgramEditorPanel(QWidget):
                 self.repeat_check.setChecked(False)
                 self.final_check.setChecked(False)
                 self.reset_rotations_check.setChecked(False)
+                self.reverse_check.setChecked(False)
             else:
                 self.phase_name_edit.setText(phase.name)
                 self.frame_start_spin.setValue(phase.frame_start)
@@ -253,6 +263,7 @@ class ProgramEditorPanel(QWidget):
                 self.repeat_check.setChecked(phase.repeat_until_rotations_complete)
                 self.final_check.setChecked(phase.is_final_phase)
                 self.reset_rotations_check.setChecked(phase.reset_rotations_on_entry)
+                self.reverse_check.setChecked(phase.play_reverse)
         finally:
             self._loading = False
 
@@ -301,6 +312,7 @@ class ProgramEditorPanel(QWidget):
         phase.repeat_until_rotations_complete = self.repeat_check.isChecked()
         phase.is_final_phase = self.final_check.isChecked()
         phase.reset_rotations_on_entry = self.reset_rotations_check.isChecked()
+        phase.play_reverse = self.reverse_check.isChecked()
 
         self.phase_list.item(self.phase_list.currentRow()).setText(phase.name)
         # Renaming this phase may affect other phases' next_phase combo labels.

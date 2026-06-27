@@ -74,7 +74,34 @@ def test_flat_ride_animation_block_omits_false_flags(tmp_path):
 
     assert "repeatUntilRotationsComplete" not in phase
     assert "resetRotationsOnEntry" not in phase
+    assert "playReverse" not in phase  # omitted when not reversed
     assert "nextPhase" not in phase  # omitted when isFinalPhase
+
+
+def test_flat_ride_animation_block_emits_play_reverse_when_set(tmp_path):
+    """playReverse is emitted only when the phase opts in - the engine
+    (RideObject.cpp) expands a true value into a descending TimeToSpriteMap,
+    so the same authored frame range plays backwards (e.g. restraints opening
+    by reversing the closing range) without duplicating any images."""
+    project = make_synthetic_project(tmp_path)
+    project.programs = [
+        AnimationProgram(
+            name="P",
+            phases=[
+                AnimationPhase(name="Close", frame_start=0, frame_count=2, next_phase=1),
+                AnimationPhase(name="Open", frame_start=0, frame_count=2, play_reverse=True, is_final_phase=True),
+            ],
+        ),
+    ]
+
+    phases = flat_ride_animation_block(project)["programs"][0]["phases"]
+
+    # The forward phase reuses the exact same frame range, no reverse key.
+    assert "playReverse" not in phases[0]
+    assert phases[0]["startFrame"] == 0 and phases[0]["endFrame"] == 1
+    # The reverse phase points at that same range and flags the reversal.
+    assert phases[1]["playReverse"] is True
+    assert phases[1]["startFrame"] == 0 and phases[1]["endFrame"] == 1
 
 
 def test_flat_ride_animation_block_end_frame_inclusive(tmp_path):
