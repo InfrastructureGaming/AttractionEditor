@@ -6,11 +6,14 @@ the model."""
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QComboBox, QPushButton
 
+from attraction_editor.build.layers import composite_preview_frame
+from attraction_editor.sprites.scanner import frame_path
 from attraction_editor.ui import layers_panel as layers_panel_module
 from attraction_editor.ui.layers_panel import LayersPanel
-from tests.fixtures.synthetic import make_synthetic_project
+from attraction_editor.ui.preview_widget import PreviewWidget
+from tests.fixtures.synthetic import make_synthetic_project, write_animated_layer_frames
 
 
 def _browse_button_for(line_edit) -> QPushButton:
@@ -105,3 +108,55 @@ def test_car_browse_button_commits_sprite_dir_without_extra_interaction(qtbot, t
 
     assert project.cars[0].sprite_dir == "Frames/Riders/PickedViaBrowse"
     assert panel.car_sprite_dir_edit.text() == "Frames/Riders/PickedViaBrowse"
+
+
+def _panel_with_preview(qtbot, project):
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    captured: list = []
+    preview = PreviewWidget()
+    preview.set_image = lambda img: captured.append(img)  # capture the final composite
+    panel.set_preview_widget(preview)
+    direction_combo = QComboBox()
+    direction_combo.addItems([f"Direction {d}" for d in range(4)])
+    panel.set_direction_combo(direction_combo)
+    panel.set_project(project)
+    return panel, captured
+
+
+def test_preview_overlays_rider_cars_on_the_structure(qtbot, tmp_path):
+    """The Layers section's preview must show the rider cars composited on top
+    of the structure (they share the structure's per-direction anchor, so they
+    align pixel-for-pixel) - previously it rendered structure layers only, so
+    riders never appeared in this section's preview at all."""
+    project = make_synthetic_project(tmp_path, num_cars=1)
+    # Re-render the car frames with a distinct, fully-opaque seed so the
+    # overlay is detectable: it completely covers the structure where present.
+    write_animated_layer_frames(project.project_dir / project.cars[0].sprite_dir, seed=99)
+
+    panel, captured = _panel_with_preview(qtbot, project)
+
+    assert captured, "preview should have been rendered on set_project"
+    rendered = captured[-1].convert("RGBA")
+    structure_only = composite_preview_frame(project, direction=0, frame=0).convert("RGBA")
+    car_frame = frame_path(project.project_dir / project.cars[0].sprite_dir, 0, 0)
+    from PIL import Image
+
+    with Image.open(car_frame) as img:
+        car_rgba = img.convert("RGBA")
+
+    # The fully-opaque car overlay replaces the structure: the render matches
+    # the car frame, not the structure-only composite.
+    assert list(rendered.getdata()) == list(car_rgba.getdata())
+    assert list(rendered.getdata()) != list(structure_only.getdata())
+
+
+def test_preview_without_cars_is_structure_only(qtbot, tmp_path):
+    """With no rider cars, the preview is exactly the structure composite -
+    the overlay loop is a no-op."""
+    project = make_synthetic_project(tmp_path, num_cars=0)
+    panel, captured = _panel_with_preview(qtbot, project)
+
+    rendered = captured[-1].convert("RGBA")
+    structure_only = composite_preview_frame(project, direction=0, frame=0).convert("RGBA")
+    assert list(rendered.getdata()) == list(structure_only.getdata())

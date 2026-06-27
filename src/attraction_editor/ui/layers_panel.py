@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from PIL import Image
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
 
 from attraction_editor.build.layers import composite_preview_frame
 from attraction_editor.model.project import CarConfig, ColourScheme, DITHER_ALGORITHMS, LAYER_KINDS, Layer, RideProject
+from attraction_editor.sprites.scanner import frame_path
 from attraction_editor.ui.preview_widget import PreviewWidget
 
 # Display order for the kind/algorithm combos - sets are unordered, so pin
@@ -197,6 +199,23 @@ class LayersPanel(QWidget):
         except FileNotFoundError as exc:
             self.status_label.setText(f"Preview unavailable - {exc}")
             return
+
+        # Overlay the rider cars on top of the structure, exactly as the
+        # Animation section does (see AnimationPlayerPanel._update_frame): every
+        # car frame shares the structure's own per-direction anchor (see
+        # sprites/manifest.py), so it composites pixel-for-pixel with no offset.
+        # Riders are never dithered or colour-remapped (they use peep colours,
+        # not the ride's trim/tertiary scheme), so they go on raw - frame 0,
+        # since this static preview isn't animating. Missing car frames are
+        # skipped rather than failing the whole preview.
+        project_dir = self.project.project_dir
+        for car in self.project.cars:
+            car_path = frame_path(project_dir / car.sprite_dir, direction, 0)
+            if not car_path.exists():
+                continue
+            with Image.open(car_path) as car_img:
+                preview = Image.alpha_composite(preview.convert("RGBA"), car_img.convert("RGBA"))
+
         self.status_label.setText("")
         self.preview_widget.set_image(preview)
 
@@ -319,6 +338,11 @@ class LayersPanel(QWidget):
             self.car_sprite_dir_edit.setText(car.sprite_dir)
         finally:
             self._loading = False
+        # Selecting a car shows the structure with the rider cars overlaid (see
+        # _reload_preview). No projectChanged.emit() here - selection doesn't
+        # mutate the project - so the Layers panel stays the last writer to the
+        # shared preview and the riders aren't wiped by another panel's render.
+        self._reload_preview()
 
     def _on_car_field_changed(self) -> None:
         if self._loading or self.project is None:
@@ -330,7 +354,11 @@ class LayersPanel(QWidget):
         car.name = self.car_name_edit.text()
         car.sprite_dir = self.car_sprite_dir_edit.text()
         self.car_list.item(row).setText(f"{car.name}: {car.sprite_dir}")
+        # Emit first (cascades to the other preview panels via main_window),
+        # then refresh this panel's preview last so the rider overlay survives
+        # as the final write to the shared preview.
         self.projectChanged.emit()
+        self._reload_preview()
 
     def _on_add_car(self) -> None:
         if self.project is None:
@@ -341,6 +369,7 @@ class LayersPanel(QWidget):
         self._reload_car_list()
         self.car_list.setCurrentRow(index)
         self.projectChanged.emit()
+        self._reload_preview()
 
     def _on_remove_car(self) -> None:
         if self.project is None:
@@ -351,6 +380,7 @@ class LayersPanel(QWidget):
         del self.project.cars[row]
         self._reload_car_list()
         self.projectChanged.emit()
+        self._reload_preview()
 
 
 def _path_field(project_dir_getter: Callable[[], Path | None] | None = None) -> tuple[QLineEdit, QWidget]:
