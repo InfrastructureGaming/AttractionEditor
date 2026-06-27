@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 
 from attraction_editor.build.layers import composite_preview_frame
 from attraction_editor.model.project import ColourScheme, RideProject
-from attraction_editor.palette.remap import load_colour_ramps
+from attraction_editor.ui.colour_swatch_picker import ColourSwatchPicker
 from attraction_editor.ui.preview_widget import PreviewWidget
 
 
@@ -67,8 +67,6 @@ class ColourPreviewPanel(QWidget):
         self._loading = False
         self._active_scheme: ColourScheme | None = None
 
-        colours = sorted(load_colour_ramps().keys())
-
         self.scheme_list = QListWidget()
         add_btn = QPushButton("Add scheme")
         remove_btn = QPushButton("Remove scheme")
@@ -77,10 +75,11 @@ class ColourPreviewPanel(QWidget):
         list_buttons.addWidget(add_btn)
         list_buttons.addWidget(remove_btn)
 
-        self.trim_combo = QComboBox()
-        self.trim_combo.addItems(colours)
-        self.tertiary_combo = QComboBox()
-        self.tertiary_combo.addItems(colours)
+        # Swatch grids, not text lists - the engine's colour names are hard to
+        # picture (see ui/colour_swatch_picker.py). API-compatible with the
+        # QComboBox they replaced (currentText/setCurrentText/currentTextChanged).
+        self.trim_combo = ColourSwatchPicker()
+        self.tertiary_combo = ColourSwatchPicker()
 
         # Widen (positive) or narrow (negative) which pixels actually land
         # in each remap zone during dithering for the *real* build - see
