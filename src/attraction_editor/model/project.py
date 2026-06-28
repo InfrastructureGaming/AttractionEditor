@@ -11,6 +11,24 @@ DIRECTIONS = 4
 LAYER_KINDS = {"static", "animated"}
 DITHER_ALGORITHMS = {"floyd_steinberg", "bayer", "atkinson", "none"}
 
+# Breakdowns the tool will author into object.json's "breakdowns" array (parsed
+# by RideObject.cpp), spelled exactly as the engine's Breakdown enum. Present
+# (even empty) => it replaces the ride type's default breakdown set for this
+# ride; empty => the ride never breaks down. Order is display order.
+#
+# Only the breakdowns fully wired for flat rides today are listed - they halt or
+# cut out the ride and need no part-specific animation. restraintsStuck*/
+# doorsStuck* are deliberately NOT here: the engine drives those through a
+# vehicle's restraint/door sprite state, which our phase-animated flat rides
+# don't have, so emitting one would soft-lock the ride. They'll be added once the
+# animation-bridge subsystem (freeze the declared restraint/door phase on
+# breakdown) lands. brakesFailure is excluded outright - it's tracked-ride-only.
+BREAKDOWN_TYPES = [
+    "safetyCutOut",
+    "controlFailure",
+    "vehicleMalfunction",
+]
+
 
 @dataclass
 class DirectionAnchor:
@@ -196,6 +214,13 @@ class RideProject:
     rating_excitement: float = 3.0
     rating_intensity: float = 2.0
     rating_nausea: float = 1.0
+    # The breakdowns this ride may suffer, written into object.json's
+    # "breakdowns" array (see build/object_json.py + BREAKDOWN_TYPES). The tool
+    # always emits this, so it always replaces the ride type's default set: an
+    # empty list means the ride never breaks down. Defaults to ["safetyCutOut"],
+    # which matches what FlatRideGenericRTD gave every custom ride before this
+    # field existed - so loading/rebuilding an older project is a no-op.
+    breakdowns: list[str] = field(default_factory=lambda: ["safetyCutOut"])
     # Optional path (relative to project_dir, or absolute) to a source image
     # used as the ride's preview thumbnail in the New Ride / construction
     # window. Fitted to 112x112 and built as a flat ("raw" format) sprite at
@@ -243,6 +268,11 @@ class RideProject:
                 f"({self.base_footprint_width * self.base_footprint_length} tiles) exceeds the "
                 f"engine's {self.MAX_FOOTPRINT_TILES}-tile cap per track piece"
             )
+        for breakdown in self.breakdowns:
+            if breakdown not in BREAKDOWN_TYPES:
+                raise ValueError(
+                    f"Unknown breakdown {breakdown!r}, expected one of {BREAKDOWN_TYPES}"
+                )
         for layer in self.layers:
             if layer.kind not in LAYER_KINDS:
                 raise ValueError(f"Layer {layer.name!r} has invalid kind {layer.kind!r}, expected one of {LAYER_KINDS}")

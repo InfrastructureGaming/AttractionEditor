@@ -88,6 +88,45 @@ def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
     assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
 
 
+def test_breakdowns_round_trip_through_save_and_load(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.breakdowns = ["safetyCutOut", "vehicleMalfunction"]
+
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+
+    loaded = type(project).load(path)
+
+    assert loaded.breakdowns == ["safetyCutOut", "vehicleMalfunction"]
+
+
+def test_load_back_compat_for_projects_without_breakdowns(tmp_path: Path):
+    """A project saved before breakdowns existed defaults to ["safetyCutOut"] -
+    exactly what FlatRideGenericRTD gave it before - so rebuilding is a no-op."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data.pop("breakdowns")
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = RideProject.load(path)
+
+    assert loaded.breakdowns == ["safetyCutOut"]
+
+
+def test_unknown_breakdown_is_rejected(tmp_path: Path):
+    """brakesFailure (and any non-authorable name) must not slip into a project -
+    it's tracked-ride-only and would be a no-op or worse on a flat ride."""
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data["breakdowns"] = ["brakesFailure"]
+    path = tmp_path / "bad.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unknown breakdown"):
+        RideProject.load(path)
+
+
 def test_thumbnail_path_round_trips_through_save_and_load(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     project.thumbnail_path = "Frames/thumb.png"

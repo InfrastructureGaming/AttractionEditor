@@ -204,6 +204,10 @@ def write_object_json(project: RideProject) -> dict:
     properties["carsPerFlatRide"] = 1
     properties["carColours"] = colour_schemes_block(project)
     properties["cars"] = cars_block(project)
+    # Always emitted, so it always replaces the generic flat-ride type's default
+    # breakdown set for this ride (RideObject.cpp -> Ride::getAvailableBreakdowns).
+    # An empty list means the ride never breaks down (see RideProject.breakdowns).
+    properties["breakdowns"] = list(project.breakdowns)
 
     animation = flat_ride_animation_block(project)
     if animation is not None:

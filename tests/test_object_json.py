@@ -294,11 +294,33 @@ def test_write_object_json_creates_file_from_scratch(tmp_path):
         [["bright_red", "bright_red", "white"]],
     ]
     assert written["properties"]["cars"] == cars_block(project)
+    assert written["properties"]["breakdowns"] == project.breakdowns == ["safetyCutOut"]
     assert written["strings"]["name"] == {"en-GB": project.name}
     assert written["strings"]["description"] == {"en-GB": project.description}
 
     on_disk = json.loads((tmp_path / "object.json").read_text(encoding="utf-8"))
     assert on_disk == written
+
+
+def test_write_object_json_emits_selected_breakdowns(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    project.breakdowns = ["safetyCutOut", "controlFailure", "vehicleMalfunction"]
+
+    written = write_object_json(project)
+
+    assert written["properties"]["breakdowns"] == ["safetyCutOut", "controlFailure", "vehicleMalfunction"]
+
+
+def test_write_object_json_emits_empty_breakdowns_when_disabled(tmp_path):
+    """An empty list is always emitted (not omitted), so the engine reads it as
+    an explicit override meaning 'never breaks down', not as 'use the ride type
+    default'."""
+    project = make_synthetic_project(tmp_path)
+    project.breakdowns = []
+
+    written = write_object_json(project)
+
+    assert written["properties"]["breakdowns"] == []
 
 
 def test_write_object_json_is_authoritative_for_existing_fields(tmp_path):

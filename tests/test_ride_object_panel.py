@@ -4,6 +4,7 @@ not derivable from sprites/anchors/animation programs."""
 
 from __future__ import annotations
 
+from attraction_editor.model.project import BREAKDOWN_TYPES
 from attraction_editor.ui.ride_object_panel import RideObjectPanel
 from tests.fixtures.synthetic import make_synthetic_project
 
@@ -126,3 +127,82 @@ def test_panel_disabled_until_project_set(qtbot):
     qtbot.addWidget(panel)
 
     assert not panel.isEnabled()
+
+
+def test_breakdown_checks_load_from_project(qtbot, tmp_path):
+    panel = RideObjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.breakdowns = ["safetyCutOut", "vehicleMalfunction"]
+
+    panel.set_project(project)
+
+    assert panel.breakdown_checks["safetyCutOut"].isChecked()
+    assert panel.breakdown_checks["vehicleMalfunction"].isChecked()
+    assert not panel.breakdown_checks["controlFailure"].isChecked()
+    assert not panel.disable_breakdowns_check.isChecked()
+
+
+def test_checking_a_breakdown_writes_to_project(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+
+    panel.breakdown_checks["controlFailure"].setChecked(True)
+
+    assert "controlFailure" in project.breakdowns
+
+
+def test_emitted_breakdowns_follow_canonical_order(qtbot, tmp_path):
+    """Regardless of the order boxes are toggled, the stored list is in
+    BREAKDOWN_TYPES order so the built object.json is deterministic."""
+    panel, project = _panel_with_project(qtbot, tmp_path)  # default: safetyCutOut
+
+    panel.breakdown_checks["vehicleMalfunction"].setChecked(True)
+    panel.breakdown_checks["controlFailure"].setChecked(True)
+
+    assert project.breakdowns == BREAKDOWN_TYPES
+
+
+def test_master_disable_clears_and_greys_all_breakdowns(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+    panel.breakdown_checks["controlFailure"].setChecked(True)
+
+    panel.disable_breakdowns_check.setChecked(True)
+
+    assert project.breakdowns == []
+    for key in BREAKDOWN_TYPES:
+        assert not panel.breakdown_checks[key].isChecked()
+        assert not panel.breakdown_checks[key].isEnabled()
+
+
+def test_unchecking_master_disable_re_enables_authorable_breakdowns(qtbot, tmp_path):
+    panel, _project = _panel_with_project(qtbot, tmp_path)
+    panel.disable_breakdowns_check.setChecked(True)
+
+    panel.disable_breakdowns_check.setChecked(False)
+
+    for key in BREAKDOWN_TYPES:
+        assert panel.breakdown_checks[key].isEnabled()
+
+
+def test_empty_breakdowns_loads_as_master_disabled(qtbot, tmp_path):
+    panel = RideObjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.breakdowns = []
+
+    panel.set_project(project)
+
+    assert panel.disable_breakdowns_check.isChecked()
+    for key in BREAKDOWN_TYPES:
+        assert not panel.breakdown_checks[key].isEnabled()
+
+
+def test_gated_breakdowns_are_shown_but_never_authorable(qtbot, tmp_path):
+    """restraints/doors are visible as a 'coming later' affordance but disabled
+    and absent from BREAKDOWN_TYPES, so they can never be emitted."""
+    panel, _project = _panel_with_project(qtbot, tmp_path)
+
+    for key in ("restraintsStuckClosed", "restraintsStuckOpen", "doorsStuckClosed", "doorsStuckOpen"):
+        assert key in panel.breakdown_checks
+        assert not panel.breakdown_checks[key].isEnabled()
+        assert key not in BREAKDOWN_TYPES

@@ -21,9 +21,46 @@ runs once carsPerFlatRide is set."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLineEdit, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QLineEdit,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
-from attraction_editor.model.project import RideProject
+from attraction_editor.model.project import BREAKDOWN_TYPES, RideProject
+
+# Display labels for every breakdown checkbox. The authorable ones come from
+# BREAKDOWN_TYPES; the rest are shown disabled as a "coming later" affordance.
+_BREAKDOWN_LABELS = {
+    "safetyCutOut": "Safety cut-out",
+    "controlFailure": "Control failure",
+    "vehicleMalfunction": "Vehicle malfunction",
+    "restraintsStuckClosed": "Restraints stuck closed",
+    "restraintsStuckOpen": "Restraints stuck open",
+    "doorsStuckClosed": "Doors stuck closed",
+    "doorsStuckOpen": "Doors stuck open",
+}
+
+# Shown but not yet selectable: these drive a vehicle's restraint/door sprite
+# state, which our phase-animated flat rides don't have, so they need the
+# animation-bridge subsystem (freeze the declared restraint/door phase on
+# breakdown) before they can be authored. Listed here purely so artists can see
+# they're planned. Kept out of BREAKDOWN_TYPES so they can never be emitted.
+_GATED_BREAKDOWNS = [
+    "restraintsStuckClosed",
+    "restraintsStuckOpen",
+    "doorsStuckClosed",
+    "doorsStuckOpen",
+]
+_GATED_BREAKDOWN_TOOLTIP = (
+    "Not yet available: needs a declared restraints/doors animation phase for the\n"
+    "breakdown to freeze. Coming in a later update."
+)
 
 
 class RideObjectPanel(QWidget):
@@ -91,6 +128,23 @@ class RideObjectPanel(QWidget):
         self.rating_nausea_spin.setDecimals(2)
         self.rating_nausea_spin.setSingleStep(0.01)
 
+        # Breakdowns this ride can suffer. The master "Disable" checkbox is pure
+        # UX sugar over an empty selection (a clearer affordance for arcades/
+        # static rides): checking it clears + greys every breakdown, exactly the
+        # same result as leaving them all unchecked.
+        self.disable_breakdowns_check = QCheckBox("Disable breakdowns (this ride never breaks down)")
+        self.breakdown_checks: dict[str, QCheckBox] = {}
+        breakdown_layout = QVBoxLayout()
+        breakdown_layout.addWidget(self.disable_breakdowns_check)
+        for key in [*BREAKDOWN_TYPES, *_GATED_BREAKDOWNS]:
+            check = QCheckBox(_BREAKDOWN_LABELS[key])
+            if key not in BREAKDOWN_TYPES:
+                check.setToolTip(_GATED_BREAKDOWN_TOOLTIP)
+            self.breakdown_checks[key] = check
+            breakdown_layout.addWidget(check)
+        self.breakdown_box = QGroupBox("Breakdowns")
+        self.breakdown_box.setLayout(breakdown_layout)
+
         form = QFormLayout()
         form.addRow("Car tab offset", self.car_tab_offset_spin)
         form.addRow("Car tab scale", self.car_tab_scale_spin)
@@ -107,6 +161,7 @@ class RideObjectPanel(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(form)
+        layout.addWidget(self.breakdown_box)
         self.setLayout(layout)
 
         self.car_tab_offset_spin.valueChanged.connect(self._on_field_changed)
@@ -121,6 +176,10 @@ class RideObjectPanel(QWidget):
         self.rating_excitement_spin.valueChanged.connect(self._on_field_changed)
         self.rating_intensity_spin.valueChanged.connect(self._on_field_changed)
         self.rating_nausea_spin.valueChanged.connect(self._on_field_changed)
+
+        self.disable_breakdowns_check.toggled.connect(self._on_disable_breakdowns_toggled)
+        for check in self.breakdown_checks.values():
+            check.toggled.connect(self._on_field_changed)
 
         self.setEnabled(False)
 
@@ -140,9 +199,38 @@ class RideObjectPanel(QWidget):
             self.rating_excitement_spin.setValue(project.rating_excitement)
             self.rating_intensity_spin.setValue(project.rating_intensity)
             self.rating_nausea_spin.setValue(project.rating_nausea)
+
+            # Empty breakdown set => the master "Disable" affordance is on.
+            self.disable_breakdowns_check.setChecked(not project.breakdowns)
+            for key, check in self.breakdown_checks.items():
+                check.setChecked(key in project.breakdowns)
         finally:
             self._loading = False
+        self._apply_breakdown_enabled_state()
         self.setEnabled(True)
+
+    def _apply_breakdown_enabled_state(self) -> None:
+        """A breakdown checkbox is interactive only when it's an authorable type
+        AND the master 'Disable' isn't overriding everything. Gated (future)
+        types stay disabled regardless."""
+        disabled_all = self.disable_breakdowns_check.isChecked()
+        for key, check in self.breakdown_checks.items():
+            check.setEnabled(not disabled_all and key in BREAKDOWN_TYPES)
+
+    def _on_disable_breakdowns_toggled(self, checked: bool) -> None:
+        if self._loading:
+            return
+        if checked:
+            # Clear every selection (guarded so the per-box signals don't each
+            # write the model), then grey them out.
+            self._loading = True
+            try:
+                for check in self.breakdown_checks.values():
+                    check.setChecked(False)
+            finally:
+                self._loading = False
+        self._apply_breakdown_enabled_state()
+        self._on_field_changed()
 
     def _on_field_changed(self, *_args) -> None:
         if self._loading or self.project is None:
@@ -159,4 +247,10 @@ class RideObjectPanel(QWidget):
         self.project.rating_excitement = self.rating_excitement_spin.value()
         self.project.rating_intensity = self.rating_intensity_spin.value()
         self.project.rating_nausea = self.rating_nausea_spin.value()
+        # Master disable => empty set. Otherwise the checked authorable types, in
+        # BREAKDOWN_TYPES order so the emitted list is deterministic.
+        if self.disable_breakdowns_check.isChecked():
+            self.project.breakdowns = []
+        else:
+            self.project.breakdowns = [key for key in BREAKDOWN_TYPES if self.breakdown_checks[key].isChecked()]
         self.projectChanged.emit()
