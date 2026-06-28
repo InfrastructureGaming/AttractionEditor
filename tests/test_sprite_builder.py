@@ -6,12 +6,16 @@ from __future__ import annotations
 
 import json
 import struct
+import sys
+from pathlib import Path
 
 import pytest
 
 from attraction_editor.build.sprite_builder import (
+    BuildAborted,
     SpriteBuildError,
     _car_manifest_path,
+    _run_cancellable,
     build_images_dat,
     read_images_dat_header,
     write_manifest,
@@ -81,6 +85,47 @@ def test_read_images_dat_header_too_small(tmp_path):
 
     with pytest.raises(SpriteBuildError):
         read_images_dat_header(images_dat)
+
+
+def test_build_images_dat_aborts_before_cli_when_cancelled(tmp_path):
+    """should_cancel returning True bails before launching openrct2-cli -
+    compositing still runs (it's pure Python), but no images.dat is produced.
+    Needs no CLI, so it isn't skipped."""
+    project = make_synthetic_project(tmp_path)
+
+    with pytest.raises(BuildAborted):
+        build_images_dat(project, should_cancel=lambda: True)
+
+    assert not (project.project_dir / "images.dat").exists()
+
+
+def test_build_images_dat_propagates_abort_raised_from_on_progress(tmp_path):
+    """The compositing phase is cancelled by raising BuildAborted from
+    on_progress (what the Abort button's worker does) - it must propagate out,
+    not get swallowed, and the temp dir is cleaned up on the way."""
+    project = make_synthetic_project(tmp_path)
+
+    def abort_on_first_frame(done: int, total: int) -> None:
+        raise BuildAborted()
+
+    with pytest.raises(BuildAborted):
+        build_images_dat(project, on_progress=abort_on_first_frame)
+
+
+def test_run_cancellable_returns_completed_process_for_quick_command():
+    result = _run_cancellable([sys.executable, "-c", "print('ok')"], cwd=Path.cwd())
+
+    assert result.returncode == 0
+    assert "ok" in result.stdout
+
+
+def test_run_cancellable_terminates_when_cancelled():
+    with pytest.raises(BuildAborted):
+        _run_cancellable(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=Path.cwd(),
+            should_cancel=lambda: True,
+        )
 
 
 @pytest.mark.skipif(not OPENRCT2_CLI_PATH.exists(), reason="openrct2-cli.exe not available")

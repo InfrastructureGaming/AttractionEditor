@@ -35,6 +35,50 @@ class SpriteBuildError(RuntimeError):
     pass
 
 
+class BuildAborted(Exception):
+    """Raised when a build is cancelled by the user (see build_images_dat's
+    should_cancel and ui/build_panel.py's Abort button). Distinct from
+    SpriteBuildError so callers can tell a deliberate abort from a real
+    failure and report it differently."""
+
+
+def _run_cancellable(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    should_cancel: Callable[[], bool] | None = None,
+    poll_interval: float = 0.2,
+) -> subprocess.CompletedProcess:
+    """Like subprocess.run(cmd, cwd=cwd, capture_output=True, text=True), but
+    polls `should_cancel` every `poll_interval` seconds while the process runs
+    and terminates it (raising BuildAborted) if it returns True - openrct2-cli's
+    sprite build for a large ride can run for a while, so it must be stoppable
+    mid-run, not just at Python step boundaries.
+
+    communicate() (not poll()) is what drains the stdout/stderr pipes, so
+    looping on its timeout both waits for the process and keeps the pipes from
+    filling and deadlocking a chatty CLI. The finally clause guarantees the
+    child is killed and reaped on every exit path (including the abort raise),
+    with bounded waits throughout so a wind-down can never block forever."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=poll_interval)
+                return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+            except subprocess.TimeoutExpired:
+                # Still running - check for an abort request, then keep draining.
+                if should_cancel is not None and should_cancel():
+                    raise BuildAborted("Build aborted during image build")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+
 def _car_manifest_path(raw_path: str, project_dir: Path, tmp_dir_path: Path) -> str:
     """Return `raw_path` (a car's frame file, normally project_dir-relative -
     see model.project.CarConfig - but possibly absolute: legacy project data,
@@ -94,6 +138,7 @@ def build_images_dat(
     *,
     dither: bool = True,
     on_progress: Callable[[int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> SpriteBuildResult:
     """Composite every structure layer (optionally dithered per its own
     algorithm/strength - see model.project.Layer), then run
@@ -109,9 +154,13 @@ def build_images_dat(
     `on_progress(done, total)` is called after each composited frame is
     written, so callers can report progress during large builds.
 
+    `should_cancel()`, if given, is polled before the CLI launches and while
+    it runs; returning True raises BuildAborted (the compositing phase is
+    cancelled separately, by raising from on_progress - see ui/build_panel.py).
+
     Raises SpriteBuildError if the CLI fails, the reported image count
     doesn't match the manifest, or images.dat looks too small to contain
-    real (non-blank) sprite data.
+    real (non-blank) sprite data. Raises BuildAborted if should_cancel fires.
     """
     if project.project_dir is None:
         raise ValueError("RideProject.project_dir is not set")
@@ -167,12 +216,15 @@ def build_images_dat(
         tmp_manifest = tmp_dir_path / MANIFEST_FILENAME
         tmp_manifest.write_text(json.dumps(rel_structure + rel_car, indent=4), encoding="utf-8")
 
-        result = subprocess.run(
+        # Bail before launching the CLI if the user aborted during compositing,
+        # then poll for abort throughout the (potentially long) CLI run itself.
+        if should_cancel is not None and should_cancel():
+            raise BuildAborted("Build aborted before image build")
+        result = _run_cancellable(
             [str(project.openrct2_cli_path), "sprite", "build",
              str(images_dat_path), str(tmp_manifest), "-m", "closest"],
             cwd=tmp_dir_path,
-            capture_output=True,
-            text=True,
+            should_cancel=should_cancel,
         )
 
     manifest_path = write_manifest(project)  # documentary, written after tmp cleanup
