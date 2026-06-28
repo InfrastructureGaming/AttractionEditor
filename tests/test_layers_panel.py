@@ -160,3 +160,54 @@ def test_preview_without_cars_is_structure_only(qtbot, tmp_path):
     rendered = captured[-1].convert("RGBA")
     structure_only = composite_preview_frame(project, direction=0, frame=0).convert("RGBA")
     assert list(rendered.getdata()) == list(structure_only.getdata())
+
+
+def test_editing_strength_spin_does_not_commit_until_applied(qtbot, tmp_path):
+    """Typing a new dither strength must not reach the model (and so must not
+    trigger a re-dither) until Apply is clicked - the spin is digit-by-digit."""
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    panel.set_project(project)
+    panel.layer_list.setCurrentRow(0)
+
+    original = project.layers[0].dither_strength
+    panel.strength_spin.setValue(original + 5)
+    assert project.layers[0].dither_strength == original  # not yet applied
+
+    panel.apply_strength_btn.click()
+    assert project.layers[0].dither_strength == original + 5
+
+
+def test_changing_another_field_does_not_leak_unapplied_strength(qtbot, tmp_path):
+    """An unapplied strength value must not be committed as a side effect of
+    editing a different field."""
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    panel.set_project(project)
+    panel.layer_list.setCurrentRow(0)
+
+    original = project.layers[0].dither_strength
+    panel.strength_spin.setValue(original + 5)
+
+    panel.name_edit.setText("Renamed")
+    panel.name_edit.editingFinished.emit()
+
+    assert project.layers[0].name == "Renamed"
+    assert project.layers[0].dither_strength == original  # still unapplied
+
+
+def test_apply_strength_emits_project_changed(qtbot, tmp_path):
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    panel.set_project(project)
+    panel.layer_list.setCurrentRow(0)
+
+    calls = []
+    panel.projectChanged.connect(lambda: calls.append(True))
+    panel.strength_spin.setValue(project.layers[0].dither_strength + 1)
+    panel.apply_strength_btn.click()
+
+    assert len(calls) == 1

@@ -96,13 +96,33 @@ class LayersPanel(QWidget):
             "0 = no dithering (plain nearest-match), 32 = full classic dithering for the\n"
             "chosen algorithm (the default). Values above 32 have no further effect."
         )
+        # Strength is the one field gated behind an explicit Apply: unlike the
+        # discrete dropdowns, it's typed digit-by-digit, and a re-dither runs
+        # on every committed value - so a live valueChanged binding would
+        # re-render the (expensive) dithered preview on each intermediate keystroke
+        # before the user has finished entering the number they actually want.
+        self.apply_strength_btn = QPushButton("Apply")
+        self.apply_strength_btn.setToolTip(
+            "Apply the entered dither strength and re-render the preview.\n"
+            "Strength changes aren't previewed until applied."
+        )
+        # Cap the spin and left-pack with a trailing stretch so the button sits
+        # right beside it. Without this the QFormLayout's field column (~210px
+        # wide, sized by the long-named algorithm combo) splits between the two,
+        # parking the button at the far-right edge - the first thing scrolled
+        # out of view in the narrow controls column (see ui/main_window.py).
+        self.strength_spin.setMaximumWidth(72)
+        strength_row = QHBoxLayout()
+        strength_row.addWidget(self.strength_spin)
+        strength_row.addWidget(self.apply_strength_btn)
+        strength_row.addStretch(1)
 
         form = QFormLayout()
         form.addRow("Name", self.name_edit)
         form.addRow("Sprite folder", sprite_dir_row)
         form.addRow("Kind", self.kind_combo)
         form.addRow("Dither algorithm", self.algorithm_combo)
-        form.addRow("Dither strength", self.strength_spin)
+        form.addRow("Dither strength", strength_row)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -147,7 +167,7 @@ class LayersPanel(QWidget):
         self.sprite_dir_edit.editingFinished.connect(self._on_field_changed)
         self.kind_combo.currentTextChanged.connect(self._on_field_changed)
         self.algorithm_combo.currentTextChanged.connect(self._on_field_changed)
-        self.strength_spin.valueChanged.connect(self._on_field_changed)
+        self.apply_strength_btn.clicked.connect(self._on_apply_strength)
 
         self.car_list.currentRowChanged.connect(self._on_car_selected)
         self.car_name_edit.editingFinished.connect(self._on_car_field_changed)
@@ -273,9 +293,24 @@ class LayersPanel(QWidget):
         layer.sprite_dir = self.sprite_dir_edit.text()
         layer.kind = self.kind_combo.currentText()
         layer.dither_algorithm = self.algorithm_combo.currentText()
-        layer.dither_strength = self.strength_spin.value()
+        # Strength is intentionally NOT committed here - it's applied only via
+        # _on_apply_strength so an unapplied, mid-entry value never leaks into
+        # the layer when another field changes (see the strength_spin comment).
 
         self.layer_list.item(self.layer_list.currentRow()).setText(self._label_for(layer))
+        self._reload_preview()
+        self.projectChanged.emit()
+
+    def _on_apply_strength(self) -> None:
+        """Commit the entered dither strength to the current layer and re-render.
+        The only path that writes layer.dither_strength, so the preview re-dithers
+        once, on the value the user actually chose - not on each keystroke."""
+        if self._loading:
+            return
+        layer = self._current_layer()
+        if layer is None:
+            return
+        layer.dither_strength = self.strength_spin.value()
         self._reload_preview()
         self.projectChanged.emit()
 
