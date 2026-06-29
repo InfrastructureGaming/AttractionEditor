@@ -13,10 +13,12 @@ from attraction_editor.palette.remap import (
     TERTIARY_REMAP_START,
     classify_remap_zone,
     colour_swatch_rgb,
+    linear_to_srgb,
     load_colour_ramps,
     load_standard_palette,
     pixel_distances_to_palette,
     remap_preview,
+    srgb_to_linear,
 )
 from attraction_editor.sprites.scanner import frame_path
 from tests.fixtures.synthetic import make_synthetic_project
@@ -30,6 +32,60 @@ def test_colour_swatch_rgb():
 
     middle = ramps["white"][len(ramps["white"]) // 2]
     assert [r, g, b] == palette[middle]
+
+
+def test_srgb_to_linear_known_values():
+    # Fixed points 0 and 1, and the canonical mid-grey: sRGB 0.5 -> ~0.214 linear
+    # (this gap is exactly the "dithering too dark" error linear-light fixes).
+    out = srgb_to_linear(np.array([0.0, 0.5, 1.0], dtype=np.float32))
+    assert out[0] == pytest.approx(0.0, abs=1e-6)
+    assert out[1] == pytest.approx(0.2140, abs=1e-3)
+    assert out[2] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_srgb_linear_round_trips():
+    values = np.linspace(0.0, 1.0, 64, dtype=np.float32)
+    assert np.allclose(linear_to_srgb(srgb_to_linear(values)), values, atol=1e-4)
+
+
+def test_srgb_to_linear_clips_out_of_range_inputs():
+    # Error diffusion can push a channel slightly past [0,1]; clamp, never NaN.
+    out = srgb_to_linear(np.array([-0.5, 1.5], dtype=np.float32))
+    assert not np.any(np.isnan(out))
+    assert out[0] == pytest.approx(0.0) and out[1] == pytest.approx(1.0)
+
+
+def test_pixel_distances_default_path_is_unchanged_srgb():
+    # An exact palette colour has ~0 distance to its own entry, and the default
+    # (sRGB) path is byte-for-byte the old behaviour (linear is opt-in only).
+    palette = load_standard_palette()
+    arr = np.array([[palette[100]]], dtype=np.uint8)  # shape (1,1,3)
+    srgb = pixel_distances_to_palette(arr)
+    assert srgb.shape == (1, 256)
+    assert int(np.argmin(srgb[0])) == 100
+    assert srgb[0, 100] == pytest.approx(0.0, abs=1e-3)
+    assert np.array_equal(srgb, pixel_distances_to_palette(arr, linear=False))
+
+
+def test_pixel_distances_linear_is_smaller_scale_but_same_extremes():
+    palette = np.array(load_standard_palette(), dtype=np.uint8)
+    # Pure black and pure white are transfer-function fixed points, so the
+    # nearest palette entry must agree across both colour spaces.
+    extremes = np.array([[[0, 0, 0], [255, 255, 255]]], dtype=np.uint8)
+    srgb = pixel_distances_to_palette(extremes)
+    lin = pixel_distances_to_palette(extremes, linear=True)
+    assert lin.max() <= 3.0 + 1e-3  # linear distances live in [0, 3], not 0..195075
+    assert srgb.max() > 3.0
+    assert np.array_equal(np.argmin(srgb, axis=1), np.argmin(lin, axis=1))
+
+
+def test_linear_and_srgb_disagree_on_some_midtone_match():
+    """The whole point: linear-light nearest-matching genuinely differs from
+    sRGB for midtones (otherwise the change would be cosmetic)."""
+    greys = np.array([[[v, v, v] for v in range(8, 248, 8)]], dtype=np.uint8)
+    srgb_idx = np.argmin(pixel_distances_to_palette(greys), axis=1)
+    lin_idx = np.argmin(pixel_distances_to_palette(greys, linear=True), axis=1)
+    assert not np.array_equal(srgb_idx, lin_idx)
 
 
 def test_remap_preview_recolours_secondary_and_tertiary_pixels():

@@ -40,6 +40,39 @@ TERTIARY_REMAP_START = 46
 PRIMARY_REMAP_START = 243
 REMAP_LENGTH = 12
 
+# sRGB <-> linear-light transfer (IEC 61966-2-1). Colour distance and error
+# diffusion are physically meaningful only in linear light: averaging or
+# nearest-matching in gamma-encoded sRGB skews toward dark (the classic
+# "dithering comes out too dark" error). These mirror libIsoRender's
+# srgb2linear/linear2srgb (see reference-community-tools) but vectorised over
+# numpy arrays. Both operate on values in [0, 1]; callers normalise 0-255
+# channels first. This is groundwork for Phase 2 of the pipeline overhaul - the
+# helpers exist and are tested here, but no existing caller switches to linear
+# yet (pixel_distances_to_palette stays sRGB by default for exact back-compat).
+_SRGB_LINEAR_THRESHOLD = 0.04045
+_LINEAR_SRGB_THRESHOLD = 0.0031308
+_SRGB_GAMMA = 2.4
+
+
+def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
+    """Convert sRGB-encoded values in [0, 1] to linear-light [0, 1]."""
+    srgb = np.clip(np.asarray(srgb, dtype=np.float32), 0.0, 1.0)
+    return np.where(
+        srgb <= _SRGB_LINEAR_THRESHOLD,
+        srgb / 12.92,
+        np.power((srgb + 0.055) / 1.055, _SRGB_GAMMA),
+    ).astype(np.float32)
+
+
+def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
+    """Inverse of srgb_to_linear: linear-light [0, 1] back to sRGB [0, 1]."""
+    linear = np.clip(np.asarray(linear, dtype=np.float32), 0.0, 1.0)
+    return np.where(
+        linear <= _LINEAR_SRGB_THRESHOLD,
+        linear * 12.92,
+        1.055 * np.power(linear, 1.0 / _SRGB_GAMMA) - 0.055,
+    ).astype(np.float32)
+
 
 @lru_cache(maxsize=1)
 def load_standard_palette() -> list[list[int]]:
@@ -61,7 +94,7 @@ def colour_swatch_rgb(colour: str) -> tuple[int, int, int]:
     return (r, g, b)
 
 
-def pixel_distances_to_palette(rgb_arr: np.ndarray) -> np.ndarray:
+def pixel_distances_to_palette(rgb_arr: np.ndarray, *, linear: bool = False) -> np.ndarray:
     """Squared RGB Euclidean distance from every pixel in `rgb_arr` (shape
     (H, W, 3) or (N, 3)) to every one of the 256 StandardPalette entries.
     Returns shape (N, 256). Computed via the sum-of-squares expansion
@@ -69,14 +102,25 @@ def pixel_distances_to_palette(rgb_arr: np.ndarray) -> np.ndarray:
     materialized (N, 256, 3) difference array - this matters because N is
     every pixel in a full sprite frame.
 
-    float32 throughout: distance-squared values for 0-255 RGB channels never
-    exceed 3*255^2 = 195075, comfortably inside float32's exactly-representable
-    integer range (up to 2^24), so this loses no precision while roughly
-    halving the matmul's cost versus float64 - this function runs on every
-    animation-preview tick once a colour scheme or catch tolerance is in use
-    (see classify_remap_zone), so that cost matters."""
+    `linear=False` (default) measures distance in raw sRGB 0-255 space, the
+    original behaviour every current caller relies on. `linear=True` converts
+    both pixels and palette to linear light first (see srgb_to_linear), so
+    nearest-match distance is physically correct - the gamma-aware path Phase 2
+    of the pipeline overhaul moves the dithering/classification onto. The two
+    paths return values on different scales (0-255^2 vs 0-1^2); only compare or
+    threshold distances computed the same way.
+
+    float32 throughout: sRGB distance-squared for 0-255 channels never exceeds
+    3*255^2 = 195075, comfortably inside float32's exactly-representable integer
+    range (2^24); the linear path's [0,1] values are smaller still. So this
+    loses no precision while roughly halving the matmul's cost versus float64 -
+    this runs on every animation-preview tick once a colour scheme or catch
+    tolerance is in use (see classify_remap_zone), so that cost matters."""
     flat = rgb_arr.reshape(-1, 3).astype(np.float32)
     palette = np.array(load_standard_palette(), dtype=np.float32)
+    if linear:
+        flat = srgb_to_linear(flat / 255.0)
+        palette = srgb_to_linear(palette / 255.0)
     sq_sum_px = np.sum(flat**2, axis=1)
     sq_sum_pal = np.sum(palette**2, axis=1)
     cross = flat @ palette.T
