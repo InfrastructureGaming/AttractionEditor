@@ -291,11 +291,20 @@ def remap_preview(
     return result
 
 
-def recolour_dithered_zones(image: Image.Image, trim_colour: str, tertiary_colour: str) -> Image.Image:
-    """Return an RGBA copy of `image` with its secondary/tertiary remap-zone
-    pixels recoloured to `trim_colour`/`tertiary_colour`'s ramps, via a
-    direct index lookup rather than remap_preview's distance-based
-    classification.
+def recolour_dithered_zones(
+    image: Image.Image, trim_colour: str, tertiary_colour: str, body_colour: str | None = None
+) -> Image.Image:
+    """Return an RGBA copy of `image` with its remap-zone pixels recoloured to
+    the given ramps, via a direct index lookup rather than remap_preview's
+    distance-based classification: secondary→`trim_colour`, tertiary→
+    `tertiary_colour`, and (when given) primary→`body_colour`.
+
+    `body_colour` handles the primary zone (243-254, the player's Main colour),
+    which only exists once a layer is authored with a COLOR_PRIMARY zone pass
+    (build/zone_mask.py); pass None to leave any primary pixels untouched (the
+    legacy two-zone preview). The engine itself recolours the primary range to
+    the ride's Body colour at runtime (see GenericFlatRide.cpp), so this mirrors
+    the in-game result.
 
     For use only on an image that has already been through
     build.dither.dither_frame_by_algorithm's zone-constrained quantisation,
@@ -334,6 +343,11 @@ def recolour_dithered_zones(image: Image.Image, trim_colour: str, tertiary_colou
     tertiary_hit = (idx >= TERTIARY_REMAP_START) & (idx < TERTIARY_REMAP_START + REMAP_LENGTH)
     result_flat[secondary_hit] = trim_ramp[idx[secondary_hit] - SECONDARY_REMAP_START]
     result_flat[tertiary_hit] = tertiary_ramp[idx[tertiary_hit] - TERTIARY_REMAP_START]
+
+    if body_colour is not None:
+        primary_ramp = np.array([palette[i] for i in ramps[body_colour]], dtype=np.uint8)
+        primary_hit = (idx >= PRIMARY_REMAP_START) & (idx < PRIMARY_REMAP_START + REMAP_LENGTH)
+        result_flat[primary_hit] = primary_ramp[idx[primary_hit] - PRIMARY_REMAP_START]
 
     result = Image.fromarray(result_flat.reshape(h, w, 3), mode="RGB").convert("RGBA")
     result.putalpha(alpha)

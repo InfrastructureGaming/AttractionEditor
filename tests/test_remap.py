@@ -9,6 +9,7 @@ from PIL import Image
 
 from attraction_editor.build.dither import dither_frame
 from attraction_editor.palette.remap import (
+    PRIMARY_REMAP_START,
     SECONDARY_REMAP_START,
     TERTIARY_REMAP_START,
     classify_remap_zone,
@@ -17,6 +18,7 @@ from attraction_editor.palette.remap import (
     load_colour_ramps,
     load_standard_palette,
     pixel_distances_to_palette,
+    recolour_dithered_zones,
     remap_preview,
     srgb_to_linear,
 )
@@ -86,6 +88,28 @@ def test_linear_and_srgb_disagree_on_some_midtone_match():
     srgb_idx = np.argmin(pixel_distances_to_palette(greys), axis=1)
     lin_idx = np.argmin(pixel_distances_to_palette(greys, linear=True), axis=1)
     assert not np.array_equal(srgb_idx, lin_idx)
+
+
+def test_recolour_dithered_zones_recolours_primary_with_body():
+    palette = load_standard_palette()
+    ramps = load_colour_ramps()
+    primary_index = PRIMARY_REMAP_START + 3
+
+    img = Image.new("RGBA", (1, 1), (*palette[primary_index], 255))
+    result = recolour_dithered_zones(img, trim_colour="black", tertiary_colour="white", body_colour="bright_red")
+
+    # primary pixel -> the bright_red ramp shade at the same in-zone offset
+    assert list(result.getpixel((0, 0))[:3]) == palette[ramps["bright_red"][3]]
+
+
+def test_recolour_dithered_zones_leaves_primary_untouched_without_body():
+    palette = load_standard_palette()
+    primary_index = PRIMARY_REMAP_START + 3
+
+    img = Image.new("RGBA", (1, 1), (*palette[primary_index], 255))
+    result = recolour_dithered_zones(img, trim_colour="black", tertiary_colour="white")
+
+    assert list(result.getpixel((0, 0))[:3]) == palette[primary_index]  # unchanged (legacy two-zone)
 
 
 def test_remap_preview_recolours_secondary_and_tertiary_pixels():
