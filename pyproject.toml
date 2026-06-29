@@ -7,6 +7,10 @@ dependencies = [
     "PySide6>=6.6",
     "Pillow>=10.0",
     "numpy>=1.26",
+    # Reads the Blender multi-layer "zone pass" EXR (per-zone recolour masks)
+    # in build/zone_mask.py. Float EXR keeps the masks exact (no PNG 8-bit/gamma
+    # quantisation). Provides the OpenEXR + Imath modules.
+    "OpenEXR>=3.2",
 ]
 
 [project.optional-dependencies]
