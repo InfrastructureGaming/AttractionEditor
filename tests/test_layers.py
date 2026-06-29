@@ -4,8 +4,10 @@ multi-layer composite-frame generation."""
 
 from __future__ import annotations
 
+import numpy as np
 from PIL import Image
 
+from attraction_editor.build.dither import primary_zone_indices
 from attraction_editor.build.layers import (
     build_composite_frames,
     composite_preview_frame,
@@ -19,8 +21,72 @@ from attraction_editor.palette.remap import (
     TERTIARY_REMAP_START,
     load_standard_palette,
 )
-from attraction_editor.sprites.scanner import frame_path
+from attraction_editor.sprites.scanner import frame_path, zone_mask_path
 from tests.fixtures.synthetic import FRAME_SIZE, make_multilayer_synthetic_project, make_synthetic_project
+
+
+def _write_single_part_zone_exr(path, width, height, layers: dict) -> None:
+    """Minimal single-part zone-pass EXR writer (read_zone_masks handles both
+    single- and multi-part); value goes in R and A, mirroring the real stencils."""
+    import Imath
+    import OpenEXR
+
+    channel = Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))
+    header = OpenEXR.Header(width, height)
+    channels, pixels = {}, {}
+    zero = np.zeros((height, width), dtype=np.float32)
+    for layer, arr in layers.items():
+        value = np.ascontiguousarray(arr.astype(np.float32))
+        for comp in ("R", "G", "B", "A"):
+            channels[f"{layer}.{comp}"] = channel
+            pixels[f"{layer}.{comp}"] = (value if comp in ("R", "A") else zero).tobytes()
+    header["channels"] = channels
+    out = OpenEXR.OutputFile(str(path), header)
+    out.writePixels(pixels)
+    out.close()
+
+
+def _palette_index_of(rgba_pixel) -> int:
+    rgb = [int(c) for c in rgba_pixel[:3]]
+    for i, entry in enumerate(load_standard_palette()):
+        if list(entry) == rgb:
+            return i
+    return -1
+
+
+def test_render_layer_frame_uses_authored_zone_masks_end_to_end(tmp_path):
+    """Full chain: Layer.zone_pass_dir -> zone_mask_path -> read_zone_masks ->
+    dither_frame_by_algorithm. An authored COLOR_PRIMARY mask drives the masked
+    pixels into the primary range (243-254) - which nothing else in the pipeline
+    can do."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+    layer.zone_pass_dir = layer.sprite_dir  # masks live alongside the beauty frames
+    zone_dir = project.project_dir / layer.zone_pass_dir
+    w, h = FRAME_SIZE
+
+    primary = np.zeros((h, w), dtype=np.float32)
+    primary[: h // 2, :] = 1.0  # top half is the primary zone
+    _write_single_part_zone_exr(zone_mask_path(zone_dir, 0, 0), w, h, {"COLOR_PRIMARY": primary})
+
+    out = np.asarray(render_layer_frame(project, layer, 0, 0, dither=True).convert("RGBA"))
+    primary_idx = set(primary_zone_indices())
+
+    assert _palette_index_of(out[0, 0]) in primary_idx  # masked (top) pixel
+    assert _palette_index_of(out[h - 1, 0]) not in primary_idx  # unmasked (bottom) pixel
+
+
+def test_render_layer_frame_without_zone_pass_is_unaffected(tmp_path):
+    """No zone_pass_dir => no masks loaded => identical to before the feature."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+    assert layer.zone_pass_dir is None
+
+    out = np.asarray(render_layer_frame(project, layer, 0, 0, dither=True).convert("RGBA"))
+    primary_idx = set(primary_zone_indices())
+    assert all(
+        _palette_index_of(out[y, x]) not in primary_idx for y in range(out.shape[0]) for x in range(out.shape[1])
+    )
 
 
 def test_render_layer_frame_static_layer_is_cached(tmp_path):

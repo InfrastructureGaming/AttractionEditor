@@ -69,6 +69,14 @@ class Layer:
     kind: str  # "static" | "animated"
     dither_algorithm: str = "floyd_steinberg"  # "floyd_steinberg" | "bayer" | "atkinson" | "none"
     dither_strength: int = 32  # meaning is algorithm-specific; ignored when dither_algorithm == "none"
+    # Optional dir (relative to project_dir) of Blender "zone pass" EXRs that
+    # parallel this layer's frames (AOVdir{d}_f{####}.exr, see
+    # sprites/scanner.zone_mask_path + build/zone_mask.py). When set, the build
+    # reads authored COLOR_TRIM/TERTIARY/PRIMARY masks from them and uses those
+    # to classify remap zones instead of the distance/catch-tolerance guess -
+    # and it's the only way to author the primary (main/body) zone. None = the
+    # legacy distance-based classification for this layer.
+    zone_pass_dir: str | None = None
 
 
 @dataclass

@@ -37,6 +37,18 @@ def static_frame_path(sprite_dir: Path, direction: int) -> Path:
     return frame_path(sprite_dir, direction, 0)
 
 
+# Prefix Blender's File Output gives the zone-pass EXR (e.g. AOVdir0_f0000.exr),
+# rendered alongside the beauty frame.
+ZONE_FILE_PREFIX = "AOV"
+
+
+def zone_mask_path(zone_dir: Path, direction: int, frame: int) -> Path:
+    """Zone-pass EXR paralleling frame_path: the AOV stencils for (direction,
+    frame), named with the ZONE_FILE_PREFIX, e.g. AOVdir0_f0000.exr. Static
+    layers reuse frame 0, same as static_frame_path."""
+    return zone_dir / f"{ZONE_FILE_PREFIX}dir{direction}_f{frame:04d}.exr"
+
+
 def scan_frame_set(sprite_dir: Path, frames_per_dir: int) -> FrameSetInfo:
     """Verify that sprite_dir contains dir0..3_f0000..{frames_per_dir-1}.png,
     all with the same dimensions, and return that common size.

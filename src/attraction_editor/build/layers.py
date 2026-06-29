@@ -21,9 +21,10 @@ from PIL import Image
 
 from attraction_editor.build.compositing import composite_layer_stack
 from attraction_editor.build.dither import dither_frame_by_algorithm, snap_to_palette
+from attraction_editor.build.zone_mask import read_zone_masks
 from attraction_editor.model.project import DIRECTIONS, ColourScheme, Layer, RideProject
 from attraction_editor.palette.remap import recolour_dithered_zones, remap_preview
-from attraction_editor.sprites.scanner import frame_path, static_frame_path
+from attraction_editor.sprites.scanner import frame_path, static_frame_path, zone_mask_path
 
 # Cache key: (layer.sprite_dir, direction). Only meaningful for static layers,
 # since there are only DIRECTIONS possible inputs total regardless of frame.
@@ -38,6 +39,20 @@ def _load_layer_source(project: RideProject, layer: Layer, direction: int, frame
     src_path = static_frame_path(sprite_dir, direction) if is_static else frame_path(sprite_dir, direction, frame)
     with Image.open(src_path) as img:
         return img.copy()
+
+
+def _load_zone_masks(project: RideProject, layer: Layer, direction: int, frame: int):
+    """Authored remap-zone masks for this (direction, frame), or None when the
+    layer has no zone pass (or the frame's EXR is absent) - in which case the
+    build falls back to the distance/catch-tolerance classification. Static
+    layers reuse frame 0, mirroring _load_layer_source."""
+    if not layer.zone_pass_dir or project.project_dir is None:
+        return None
+    zone_frame = 0 if layer.kind == "static" else frame
+    path = zone_mask_path(project.project_dir / layer.zone_pass_dir, direction, zone_frame)
+    if not path.exists():
+        return None
+    return read_zone_masks(path)
 
 
 def render_layer_frame(
@@ -72,6 +87,7 @@ def render_layer_frame(
             strength=layer.dither_strength,
             trim_tolerance=project.trim_catch_tolerance,
             tertiary_tolerance=project.tertiary_catch_tolerance,
+            zone_masks=_load_zone_masks(project, layer, direction, frame),
         )
         if dither
         else img.convert("RGBA")

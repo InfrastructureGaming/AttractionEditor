@@ -88,6 +88,24 @@ def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
     assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
 
 
+def test_layer_zone_pass_dir_round_trips_and_back_compat(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.layers[0].zone_pass_dir = "Frames/Core"  # masks alongside the beauty frames
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+
+    loaded = type(project).load(path)
+    assert loaded.layers[0].zone_pass_dir == "Frames/Core"
+
+    # A layer saved before the field existed loads with the default (None).
+    data = project.to_dict()
+    for layer in data["layers"]:
+        layer.pop("zone_pass_dir")
+    legacy = tmp_path / "legacy.ridepkg.json"
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(legacy).layers[0].zone_pass_dir is None
+
+
 def test_breakdowns_round_trip_through_save_and_load(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     project.breakdowns = ["safetyCutOut", "vehicleMalfunction"]
