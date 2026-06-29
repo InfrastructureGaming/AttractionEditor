@@ -89,6 +89,17 @@ def tertiary_zone_indices() -> frozenset[int]:
 
 
 @lru_cache(maxsize=1)
+def primary_zone_indices() -> frozenset[int]:
+    """The 12 primary-remap entries (243-254). Only reachable via an authored
+    zone mask (build/zone_mask.py): the distance-based path excludes this range
+    entirely (all_non_primary_indices, matching openrct2-cli's IsChangablePixel),
+    so nothing can land here by accident - an explicit COLOR_PRIMARY mask is the
+    only way to deliberately target it, making the ride's main/body colour
+    player-recolourable for the first time."""
+    return frozenset(range(PRIMARY_REMAP_START, PRIMARY_REMAP_START + REMAP_LENGTH))
+
+
+@lru_cache(maxsize=1)
 def structure_indices() -> frozenset[int]:
     """Every valid index except both remap zones - the candidate set for
     pixels that don't belong to either zone, so ordinary structure can never
@@ -476,9 +487,22 @@ def dither_frame_by_algorithm(
     strength: int = 32,
     trim_tolerance: int = 0,
     tertiary_tolerance: int = 0,
+    zone_masks: dict[str, np.ndarray] | None = None,
 ) -> Image.Image:
     """Dispatch to the dithering function named by `algorithm`
     ("floyd_steinberg" | "bayer" | "atkinson" | "none").
+
+    `zone_masks`, when given (keys "secondary"/"tertiary"/"primary" -> bool
+    arrays shaped like the frame, from build/zone_mask.py's authored zone pass),
+    decides remap-zone membership directly and bypasses _apply_catch_tolerance_bias
+    entirely - no distance-based guessing, no catch-tolerance, and no need to
+    render zone parts in their reference shades. It's also the only way to reach
+    the *primary* zone (the distance path excludes 243-254), so an authored
+    COLOR_PRIMARY mask is what makes the main/body colour recolourable. The
+    trim_tolerance/tertiary_tolerance arguments are ignored when zone_masks is
+    given. Authored masks are expected disjoint (they are by construction - one
+    AOV part per zone); on any overlap the later zone in
+    secondary->tertiary->primary order wins that pixel.
 
     `trim_tolerance`/`tertiary_tolerance` (see classify_remap_zone) widen or
     narrow which pixels actually land in the secondary/tertiary remap zones
@@ -525,22 +549,33 @@ def dither_frame_by_algorithm(
     if dither_fn is None:
         raise ValueError(f"Unknown dither algorithm: {algorithm!r}")
 
-    biased, secondary_mask, tertiary_mask = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
+    if zone_masks is not None:
+        # Authored masks classify directly - no catch-tolerance bias to the image.
+        biased = img.convert("RGBA")
+        zones = [
+            (zone_masks.get("secondary"), secondary_zone_indices()),
+            (zone_masks.get("tertiary"), tertiary_zone_indices()),
+            (zone_masks.get("primary"), primary_zone_indices()),
+        ]
+    else:
+        biased, secondary_mask, tertiary_mask = _apply_catch_tolerance_bias(img, trim_tolerance, tertiary_tolerance)
+        # The distance path can't target primary, so only the two zones here.
+        zones = [
+            (secondary_mask, secondary_zone_indices()),
+            (tertiary_mask, tertiary_zone_indices()),
+        ]
 
-    has_secondary = bool(np.any(secondary_mask))
-    has_tertiary = bool(np.any(tertiary_mask))
-    if not has_secondary and not has_tertiary:
+    active = [(mask, indices) for mask, indices in zones if mask is not None and bool(np.any(mask))]
+    if not active:
         return dither_fn(biased, strength=strength)
 
+    # Structure (everything outside every zone) plus one extra restricted pass
+    # per active zone, combined per pixel by mask.
     structure_result = dither_fn(biased, strength=strength, allowed_indices=structure_indices())
     result_arr = np.asarray(structure_result.convert("RGBA")).copy()
-
-    if has_secondary:
-        secondary_result = dither_fn(biased, strength=strength, allowed_indices=secondary_zone_indices())
-        result_arr[secondary_mask] = np.asarray(secondary_result.convert("RGBA"))[secondary_mask]
-    if has_tertiary:
-        tertiary_result = dither_fn(biased, strength=strength, allowed_indices=tertiary_zone_indices())
-        result_arr[tertiary_mask] = np.asarray(tertiary_result.convert("RGBA"))[tertiary_mask]
+    for mask, indices in active:
+        zone_result = dither_fn(biased, strength=strength, allowed_indices=indices)
+        result_arr[mask] = np.asarray(zone_result.convert("RGBA"))[mask]
 
     return Image.fromarray(result_arr, mode="RGBA")
 

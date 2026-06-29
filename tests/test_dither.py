@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 from PIL import Image
 
 from attraction_editor.build.dither import (
@@ -10,6 +11,8 @@ from attraction_editor.build.dither import (
     dither_frame_atkinson,
     dither_frame_bayer,
     dither_frame_by_algorithm,
+    primary_zone_indices,
+    secondary_zone_indices,
     snap_to_palette,
 )
 from attraction_editor.palette.remap import (
@@ -18,6 +21,16 @@ from attraction_editor.palette.remap import (
     SECONDARY_REMAP_START,
     load_standard_palette,
 )
+
+
+def _palette_index_of(rgba_pixel) -> int:
+    """Exact palette index of a dithered output pixel (output is always exact
+    StandardPalette RGB, so an exact match exists)."""
+    rgb = [int(c) for c in rgba_pixel[:3]]
+    for i, entry in enumerate(load_standard_palette()):
+        if list(entry) == rgb:
+            return i
+    return -1
 
 
 def _make_gradient_rgba(w: int = 64, h: int = 64) -> Image.Image:
@@ -37,6 +50,46 @@ def _make_gradient_rgba(w: int = 64, h: int = 64) -> Image.Image:
 
 def _standard_palette_set() -> set[tuple[int, int, int]]:
     return {tuple(rgb) for rgb in load_standard_palette()}
+
+
+def test_authored_secondary_mask_overrides_distance_classification():
+    """An authored zone mask classifies directly: a neutral grey pixel - which
+    the distance/catch-tolerance path would never call secondary (it's nowhere
+    near the bright-pink reference shade) - lands in the secondary range purely
+    because the mask says so."""
+    img = Image.new("RGBA", (2, 1), (120, 140, 120, 255))
+    masks = {"secondary": np.array([[True, False]])}
+
+    out = np.asarray(dither_frame_by_algorithm(img, "floyd_steinberg", zone_masks=masks).convert("RGBA"))
+
+    secondary = set(secondary_zone_indices())
+    assert _palette_index_of(out[0, 0]) in secondary  # masked pixel -> secondary
+    assert _palette_index_of(out[0, 1]) not in secondary  # structure pixel stays out
+
+
+def test_authored_primary_mask_unlocks_the_primary_range():
+    """The new capability: only an authored COLOR_PRIMARY mask can push pixels
+    into 243-254, which the distance path excludes entirely."""
+    img = Image.new("RGBA", (2, 1), (120, 140, 120, 255))
+    masks = {"primary": np.array([[True, False]])}
+
+    out = np.asarray(dither_frame_by_algorithm(img, "floyd_steinberg", zone_masks=masks).convert("RGBA"))
+
+    primary = set(primary_zone_indices())
+    assert _palette_index_of(out[0, 0]) in primary
+    assert _palette_index_of(out[0, 1]) not in primary
+
+
+def test_zone_masks_none_falls_back_to_distance_path():
+    """With no masks, behaviour is unchanged - a frame with no remap content
+    just snaps to the palette and never lands in any remap zone."""
+    img = Image.new("RGBA", (4, 4), (120, 140, 120, 255))
+
+    out = np.asarray(dither_frame_by_algorithm(img, "floyd_steinberg").convert("RGBA"))
+
+    idxs = {_palette_index_of(out[y, x]) for y in range(4) for x in range(4)}
+    assert all(i not in set(primary_zone_indices()) for i in idxs)
+    assert all(i not in set(secondary_zone_indices()) for i in idxs)
 
 
 def _make_gradient_rgba_no_zone(w: int = 16, h: int = 16) -> Image.Image:
