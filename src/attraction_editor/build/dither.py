@@ -632,30 +632,55 @@ def dither_frame_by_algorithm(
     return Image.fromarray(result_arr, mode="RGBA")
 
 
+@lru_cache(maxsize=1)
+def _palette_rgb_codes() -> frozenset[int]:
+    """Every StandardPalette colour packed as a 24-bit int, for fast exact
+    on-palette membership tests."""
+    return frozenset((int(r) << 16) | (int(g) << 8) | int(b) for r, g, b in load_standard_palette())
+
+
 def snap_to_palette(img: Image.Image) -> Image.Image:
-    """Return an RGBA copy of `img` with every pixel snapped to its single
-    nearest StandardPalette RGB value - a clean one-shot nearest-match, no
-    dithering. Primary-remap indices excluded, same as every dithering
-    function in this module.
+    """Return an RGBA copy of `img` with only its OFF-palette pixels snapped to
+    the nearest non-primary StandardPalette colour; pixels that are already an
+    exact StandardPalette entry are left untouched.
 
     Needed after alpha-compositing multiple already-dithered (exact-palette)
     layers together (build/compositing.py's composite_layer_stack):
-    Image.alpha_composite does a true per-channel weighted blend wherever
-    any layer has partial alpha (anti-aliased edges, soft shadows), which
-    produces off-palette RGB at those pixels even though every input layer
-    was itself dithered to exact palette colours beforehand. Left alone,
-    those off-palette pixels would be re-quantised uncontrollably by
-    openrct2-cli's own (non-dithered) -m closest pass at build time,
-    undermining the deliberate per-layer dithering choices with banding
-    that looks like dithering gone wrong at every layer seam. This is a
-    cleanup pass for that blending artefact, not a creative dithering
-    decision, so it's deliberately undithered - applying dithering again
-    here would just add a second, uncoordinated noise pattern on top of
-    each layer's own already-dithered result.
+    Image.alpha_composite does a true per-channel weighted blend wherever any
+    layer has partial alpha (anti-aliased edges, soft shadows), producing
+    off-palette RGB at those pixels. Left alone, openrct2-cli's -m closest pass
+    would re-quantise them uncontrollably, banding at every layer seam.
+
+    Critically, this only touches OFF-palette pixels now. The previous version
+    snapped *every* pixel to all_non_primary_indices(), which excludes the
+    243-254 primary-remap range - so it silently stripped authored COLOR_PRIMARY
+    zone pixels (exact 243-254 values) onto fixed, non-remappable colours, the
+    "Main colour won't recolour" bug. This mirrors what the CLI importer itself
+    does (ImageImporter::CalculatePaletteIndex): an exact on-palette pixel keeps
+    its index (including 243-254 via the exact GetPaletteIndex), and only
+    off-palette pixels fall back to the primary-excluding closest match. So
+    authored primary pixels now survive compositing untouched and reach
+    images.dat in 243-254, where the engine remaps them to the Main colour.
     """
     rgba = img.convert("RGBA")
     alpha = rgba.getchannel("A")
-    rgb_result = _quantise_to_real_rgb(rgba.convert("RGB"), dither=Image.Dither.NONE)
-    result = rgb_result.convert("RGBA")
+    rgb_arr = np.asarray(rgba.convert("RGB"))
+    h, w = rgb_arr.shape[:2]
+
+    # Off-palette mask: pixels NOT already an exact StandardPalette colour.
+    flat = rgb_arr.reshape(-1, 3).astype(np.uint32)
+    codes = (flat[:, 0] << 16) | (flat[:, 1] << 8) | flat[:, 2]
+    palette_codes = np.fromiter(_palette_rgb_codes(), dtype=np.uint32)
+    off_palette = ~np.isin(codes, palette_codes)
+
+    if not off_palette.any():
+        return rgba  # everything already exact - nothing to clean up
+
+    snapped = np.asarray(_quantise_to_real_rgb(rgba.convert("RGB"), dither=Image.Dither.NONE).convert("RGB"))
+    result_arr = rgb_arr.copy()
+    off_2d = off_palette.reshape(h, w)
+    result_arr[off_2d] = snapped[off_2d]
+
+    result = Image.fromarray(result_arr, mode="RGB").convert("RGBA")
     result.putalpha(alpha)
     return result

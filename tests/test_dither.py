@@ -120,6 +120,32 @@ def test_authored_zone_luma_gradient_is_monotonic_and_uses_the_ramp():
     assert len({tuple(out[0, x][:3]) for x in range(w)}) > 1  # uses the ramp, not one flat shade
 
 
+def test_snap_to_palette_preserves_authored_primary_pixels():
+    """Regression for the 'Main colour won't recolour' bug: snap_to_palette must
+    NOT strip exact 243-254 primary-remap pixels - the post-composite snap used
+    to quantise them onto fixed, non-remappable colours."""
+    palette = load_standard_palette()
+    img = Image.new("RGBA", (2, 1), (0, 0, 0, 255))
+    img.putpixel((0, 0), (*palette[248], 255))  # exact primary-range colour
+    img.putpixel((1, 0), (*palette[100], 255))  # exact normal colour
+
+    out = np.asarray(snap_to_palette(img).convert("RGBA"))
+
+    assert _palette_index_of(out[0, 0]) == 248  # primary preserved, not stripped
+    assert _palette_index_of(out[0, 1]) == 100  # normal preserved
+
+
+def test_snap_to_palette_still_fixes_off_palette_pixels():
+    """Off-palette (AA-blend) pixels are still cleaned up - to a non-primary entry."""
+    img = Image.new("RGBA", (1, 1), (127, 63, 200, 255))  # arbitrary off-palette colour
+
+    out = np.asarray(snap_to_palette(img).convert("RGBA"))
+    idx = _palette_index_of(out[0, 0])
+
+    assert idx != -1  # snapped onto an exact palette entry
+    assert idx not in set(primary_zone_indices())  # never invents a primary-zone pixel
+
+
 def test_zone_masks_none_falls_back_to_distance_path():
     """With no masks, behaviour is unchanged - a frame with no remap content
     just snaps to the palette and never lands in any remap zone."""
@@ -526,11 +552,17 @@ def test_snap_to_palette_preserves_alpha():
     assert result.getpixel((1, 0))[3] == 200
 
 
-def test_snap_to_palette_excludes_primary_remap_indices():
+def test_snap_to_palette_does_not_invent_primary_pixels_from_off_palette():
+    """An OFF-palette pixel near a primary-range colour must still snap to a
+    non-primary entry (snap must never create a spurious recolourable pixel).
+    Note: an *exact* primary pixel is now deliberately preserved - that's the
+    authored-zone path - see test_snap_to_palette_preserves_authored_primary_pixels."""
     palette = load_standard_palette()
     pal_map = {tuple(rgb): i for i, rgb in enumerate(palette)}
 
-    img = Image.new("RGBA", (1, 1), (*palette[PRIMARY_REMAP_START + 3], 255))
+    # Nudge an exact primary colour off-palette so it's an AA-blend-style pixel.
+    nudged = tuple(min(255, c + 1) for c in palette[PRIMARY_REMAP_START + 3])
+    img = Image.new("RGBA", (1, 1), (*nudged, 255))
     result = snap_to_palette(img)
 
     idx = pal_map[result.getpixel((0, 0))[:3]]
