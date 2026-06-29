@@ -33,6 +33,39 @@ def _write_zone_exr(path, width, height, layers: dict[str, np.ndarray]) -> None:
     out.close()
 
 
+def _write_multipart_zone_exr(path, width, height, layers: dict[str, np.ndarray]) -> None:
+    """Write a *multi-part* EXR - each zone its own part - which is what
+    Blender's multi-layer File Output actually produces (and what the classic
+    single-part reader silently truncated to part 0)."""
+    import OpenEXR
+
+    zero = np.zeros((height, width), dtype=np.float32)
+    parts = []
+    for layer, value_arr in layers.items():
+        value = value_arr.astype(np.float32)
+        rgba = np.stack([value, zero, zero, value], axis=-1)
+        parts.append(OpenEXR.Part({"compression": OpenEXR.ZIP_COMPRESSION, "name": layer}, {layer: rgba}))
+    OpenEXR.File(parts).write(str(path))
+
+
+def test_reads_multi_part_exr_like_blender(tmp_path):
+    """Regression for the multi-part bug: Blender writes each zone as a separate
+    EXR part, and the reader must see every part - not just the first."""
+    w, h = 4, 1
+    layers = {
+        "COLOR_TRIM": np.array([[1, 0, 0, 0]], dtype=np.float32),
+        "COLOR_PRIMARY": np.array([[0, 0, 1, 1]], dtype=np.float32),
+    }
+    path = tmp_path / "AOVdir0_f0000.exr"
+    _write_multipart_zone_exr(path, w, h, layers)
+
+    masks = read_zone_masks(path)
+
+    assert set(masks) == {"secondary", "primary"}
+    assert np.array_equal(masks["secondary"], layers["COLOR_TRIM"] > 0.5)
+    assert np.array_equal(masks["primary"], layers["COLOR_PRIMARY"] > 0.5)
+
+
 def test_reads_present_zone_layers_aligned(tmp_path):
     w, h = 4, 4
     trim = np.zeros((h, w), dtype=np.float32)
