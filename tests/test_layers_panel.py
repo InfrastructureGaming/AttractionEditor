@@ -211,3 +211,31 @@ def test_apply_strength_emits_project_changed(qtbot, tmp_path):
     panel.apply_strength_btn.click()
 
     assert len(calls) == 1
+
+
+def test_zone_pass_dir_loads_and_commits(qtbot, tmp_path):
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.layers[0].zone_pass_dir = "Frames/Core"
+    panel.set_project(project)
+    panel.layer_list.setCurrentRow(0)
+
+    assert panel.zone_pass_dir_edit.text() == "Frames/Core"
+
+    panel.zone_pass_dir_edit.setText("Frames/Zones")
+    panel.zone_pass_dir_edit.editingFinished.emit()
+    assert project.layers[0].zone_pass_dir == "Frames/Zones"
+
+
+def test_blank_zone_pass_dir_commits_as_none(qtbot, tmp_path):
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.layers[0].zone_pass_dir = "Frames/Core"
+    panel.set_project(project)
+    panel.layer_list.setCurrentRow(0)
+
+    panel.zone_pass_dir_edit.setText("")
+    panel.zone_pass_dir_edit.editingFinished.emit()
+    assert project.layers[0].zone_pass_dir is None

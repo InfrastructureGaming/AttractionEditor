@@ -86,6 +86,13 @@ class LayersPanel(QWidget):
 
         self.name_edit = QLineEdit()
         self.sprite_dir_edit, sprite_dir_row = _path_field(self._project_dir)
+        self.zone_pass_dir_edit, zone_dir_row = _path_field(self._project_dir)
+        self.zone_pass_dir_edit.setToolTip(
+            "Optional. Folder of Blender zone-pass EXRs (AOVdir{d}_f{####}.exr) tagging the\n"
+            "Trim/Tertiary/Primary recolour zones for this layer. When set, those authored\n"
+            "masks decide the zones (and unlock the Primary/body zone); leave blank to fall\n"
+            "back to classifying zones by palette distance + catch tolerance."
+        )
         self.kind_combo = QComboBox()
         self.kind_combo.addItems(_KIND_ORDER)
         self.algorithm_combo = QComboBox()
@@ -120,6 +127,7 @@ class LayersPanel(QWidget):
         form = QFormLayout()
         form.addRow("Name", self.name_edit)
         form.addRow("Sprite folder", sprite_dir_row)
+        form.addRow("Zone pass folder", zone_dir_row)
         form.addRow("Kind", self.kind_combo)
         form.addRow("Dither algorithm", self.algorithm_combo)
         form.addRow("Dither strength", strength_row)
@@ -165,6 +173,7 @@ class LayersPanel(QWidget):
 
         self.name_edit.editingFinished.connect(self._on_field_changed)
         self.sprite_dir_edit.editingFinished.connect(self._on_field_changed)
+        self.zone_pass_dir_edit.editingFinished.connect(self._on_field_changed)
         self.kind_combo.currentTextChanged.connect(self._on_field_changed)
         self.algorithm_combo.currentTextChanged.connect(self._on_field_changed)
         self.apply_strength_btn.clicked.connect(self._on_apply_strength)
@@ -270,12 +279,14 @@ class LayersPanel(QWidget):
             if layer is None:
                 self.name_edit.setText("")
                 self.sprite_dir_edit.setText("")
+                self.zone_pass_dir_edit.setText("")
                 self.kind_combo.setCurrentText("animated")
                 self.algorithm_combo.setCurrentText("floyd_steinberg")
                 self.strength_spin.setValue(32)
             else:
                 self.name_edit.setText(layer.name)
                 self.sprite_dir_edit.setText(layer.sprite_dir)
+                self.zone_pass_dir_edit.setText(layer.zone_pass_dir or "")
                 self.kind_combo.setCurrentText(layer.kind)
                 self.algorithm_combo.setCurrentText(layer.dither_algorithm)
                 self.strength_spin.setValue(layer.dither_strength)
@@ -291,6 +302,7 @@ class LayersPanel(QWidget):
 
         layer.name = self.name_edit.text()
         layer.sprite_dir = self.sprite_dir_edit.text()
+        layer.zone_pass_dir = self.zone_pass_dir_edit.text() or None
         layer.kind = self.kind_combo.currentText()
         layer.dither_algorithm = self.algorithm_combo.currentText()
         # Strength is intentionally NOT committed here - it's applied only via
