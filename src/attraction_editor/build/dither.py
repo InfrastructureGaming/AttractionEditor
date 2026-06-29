@@ -63,6 +63,7 @@ from attraction_editor.palette.remap import (
     classify_remap_zone,
     load_standard_palette,
     pixel_distances_to_palette,
+    srgb_to_linear,
 )
 
 # A colour that no EEVEE-rendered pixel will ever be near, used to fill
@@ -480,6 +481,47 @@ def _apply_catch_tolerance_bias(
     return result, secondary_mask, tertiary_mask
 
 
+def _linear_luma(rgb: np.ndarray) -> np.ndarray:
+    """Rec.601 luma in linear light for an array of 0-255 RGB (last axis = 3).
+    Linear-light so brightness comparisons are physically correct (see
+    palette.remap.srgb_to_linear); Rec.601 weights match libIsoRender. Used to
+    pick a remap-zone shade by *brightness only* - the engine recolours the hue
+    at runtime, so a zone pixel's chroma is discarded and only its luminance
+    decides which of the 12 ramp shades it lands on."""
+    linear = srgb_to_linear(np.asarray(rgb, dtype=np.float32) / 255.0)
+    return 0.299 * linear[..., 0] + 0.587 * linear[..., 1] + 0.114 * linear[..., 2]
+
+
+def _zone_luma_quantize(rgb: np.ndarray, mask: np.ndarray, ramp_indices, *, strength: int) -> np.ndarray:
+    """Return a copy of `rgb` (H, W, 3 uint8) with the `mask` pixels replaced by
+    the remap-zone ramp shade chosen by *luminance only*, ignoring chroma. This
+    is what lets a zone be authored in plain greyscale: the artist shades it
+    light-to-dark and that brightness picks the ramp shade; the engine supplies
+    the hue. strength>0 adds an ordered (Bayer) perturbation to the luma before
+    snapping, so smooth grey gradients dither across the 12 shades instead of
+    banding - ordered (not error-diffusion) so it never jitters frame to frame,
+    which matters because a zone can sit on an animated layer. strength 0 (or a
+    single-shade ramp) is a clean nearest-luma snap."""
+    palette = np.array(load_standard_palette(), dtype=np.float64)
+    ramp = sorted(ramp_indices)
+    shades_rgb = palette[ramp]
+    order = np.argsort(_linear_luma(shades_rgb))  # ascending brightness
+    levels = _linear_luma(shades_rgb)[order]
+    shades = shades_rgb[order]
+
+    luma = _linear_luma(rgb.astype(np.float64))
+    height, width = luma.shape
+    if strength > 0 and len(levels) > 1:
+        spacing = (levels[-1] - levels[0]) / (len(levels) - 1)
+        tile = np.tile(_bayer_matrix_8x8(), (height // 8 + 1, width // 8 + 1))[:height, :width]
+        luma = luma + (tile / 63.0 - 0.5) * spacing * (min(strength, 32) / 32.0)
+
+    idx = np.argmin(np.abs(luma[..., None] - levels[None, None, :]), axis=-1)
+    out = rgb.copy()
+    out[mask] = shades[idx[mask]].astype(out.dtype)
+    return out
+
+
 def dither_frame_by_algorithm(
     img: Image.Image,
     algorithm: str,
@@ -495,9 +537,11 @@ def dither_frame_by_algorithm(
     `zone_masks`, when given (keys "secondary"/"tertiary"/"primary" -> bool
     arrays shaped like the frame, from build/zone_mask.py's authored zone pass),
     decides remap-zone membership directly and bypasses _apply_catch_tolerance_bias
-    entirely - no distance-based guessing, no catch-tolerance, and no need to
-    render zone parts in their reference shades. It's also the only way to reach
-    the *primary* zone (the distance path excludes 243-254), so an authored
+    entirely - no distance-based guessing, no catch-tolerance. Authored-zone
+    pixels are then snapped to their ramp by *luminance only* (see
+    _zone_luma_quantize), so the zone can be rendered in plain greyscale and the
+    engine supplies the hue at runtime. It's also the only way to reach the
+    *primary* zone (the distance path excludes 243-254), so an authored
     COLOR_PRIMARY mask is what makes the main/body colour recolourable. The
     trim_tolerance/tertiary_tolerance arguments are ignored when zone_masks is
     given. Authored masks are expected disjoint (they are by construction - one
@@ -549,7 +593,8 @@ def dither_frame_by_algorithm(
     if dither_fn is None:
         raise ValueError(f"Unknown dither algorithm: {algorithm!r}")
 
-    if zone_masks is not None:
+    use_luma = zone_masks is not None
+    if use_luma:
         # Authored masks classify directly - no catch-tolerance bias to the image.
         biased = img.convert("RGBA")
         zones = [
@@ -569,13 +614,20 @@ def dither_frame_by_algorithm(
     if not active:
         return dither_fn(biased, strength=strength)
 
-    # Structure (everything outside every zone) plus one extra restricted pass
-    # per active zone, combined per pixel by mask.
+    # Structure (everything outside every zone) plus one extra pass per active
+    # zone, combined per pixel by mask. Authored zones pick their shade by
+    # luminance only (see _zone_luma_quantize) so they can be rendered greyscale;
+    # the legacy catch-tolerance path keeps RGB-nearest within the ramp.
     structure_result = dither_fn(biased, strength=strength, allowed_indices=structure_indices())
     result_arr = np.asarray(structure_result.convert("RGBA")).copy()
+    zone_rgb = np.asarray(biased.convert("RGB")) if use_luma else None
     for mask, indices in active:
-        zone_result = dither_fn(biased, strength=strength, allowed_indices=indices)
-        result_arr[mask] = np.asarray(zone_result.convert("RGBA"))[mask]
+        if use_luma:
+            quantised = _zone_luma_quantize(zone_rgb, mask, indices, strength=strength)
+            result_arr[..., :3][mask] = quantised[mask]
+        else:
+            zone_result = dither_fn(biased, strength=strength, allowed_indices=indices)
+            result_arr[mask] = np.asarray(zone_result.convert("RGBA"))[mask]
 
     return Image.fromarray(result_arr, mode="RGBA")
 

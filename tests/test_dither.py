@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from attraction_editor.build.dither import (
+    _linear_luma,
     dither_frame,
     dither_frame_atkinson,
     dither_frame_bayer,
@@ -19,7 +20,9 @@ from attraction_editor.palette.remap import (
     PRIMARY_REMAP_START,
     REMAP_LENGTH,
     SECONDARY_REMAP_START,
+    linear_to_srgb,
     load_standard_palette,
+    srgb_to_linear,
 )
 
 
@@ -78,6 +81,43 @@ def test_authored_primary_mask_unlocks_the_primary_range():
     primary = set(primary_zone_indices())
     assert _palette_index_of(out[0, 0]) in primary
     assert _palette_index_of(out[0, 1]) not in primary
+
+
+def test_authored_zone_picks_shade_by_luma_ignoring_chroma():
+    """The crux of grayscale authoring: two pixels with the SAME luminance but
+    very different chroma must land on the SAME ramp shade - the zone's hue is
+    irrelevant (the engine supplies it at runtime)."""
+    grey = np.array([150.0, 150.0, 150.0], dtype=np.float32)
+    grey_luma = float(_linear_luma(grey))
+    # A pure-green pixel constructed to share that exact linear luma.
+    g = float(linear_to_srgb(np.array([grey_luma / 0.587], dtype=np.float32))[0]) * 255.0
+
+    img = Image.new("RGBA", (2, 1), (0, 0, 0, 255))
+    img.putpixel((0, 0), (150, 150, 150, 255))
+    img.putpixel((1, 0), (0, int(round(g)), 0, 255))
+    masks = {"secondary": np.array([[True, True]])}
+
+    # strength=0 => deterministic nearest-luma snap (no ordered perturbation).
+    out = np.asarray(dither_frame_by_algorithm(img, "floyd_steinberg", strength=0, zone_masks=masks).convert("RGBA"))
+
+    assert tuple(out[0, 0][:3]) == tuple(out[0, 1][:3])
+
+
+def test_authored_zone_luma_gradient_is_monotonic_and_uses_the_ramp():
+    """A grey gradient maps to ascending ramp shades by brightness, spanning more
+    than one shade."""
+    w = 24
+    img = Image.new("RGBA", (w, 1), (0, 0, 0, 255))
+    for x in range(w):
+        v = int(x * 255 / (w - 1))
+        img.putpixel((x, 0), (v, v, v, 255))
+    masks = {"primary": np.ones((1, w), dtype=bool)}
+
+    out = np.asarray(dither_frame_by_algorithm(img, "floyd_steinberg", strength=0, zone_masks=masks).convert("RGBA"))
+
+    lumas = [float(_linear_luma(out[0, x][:3].astype(np.float32))) for x in range(w)]
+    assert all(lumas[i] <= lumas[i + 1] + 1e-6 for i in range(w - 1))  # non-decreasing
+    assert len({tuple(out[0, x][:3]) for x in range(w)}) > 1  # uses the ramp, not one flat shade
 
 
 def test_zone_masks_none_falls_back_to_distance_path():
