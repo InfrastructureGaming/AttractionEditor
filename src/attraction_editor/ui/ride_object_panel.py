@@ -117,6 +117,14 @@ class RideObjectPanel(QWidget):
             "vanilla stalls ~5-15, flat rides ~35-50, coasters up to ~105. Default 35."
         )
 
+        self.upkeep_cost_spin = QSpinBox()
+        self.upkeep_cost_spin.setRange(0, RideProject.UPKEEP_COST_MAX)
+        self.upkeep_cost_spin.setToolTip(
+            "Monthly running cost. Replaces the ride type's base upkeep (flat-ride\n"
+            "default 50). Higher = pricier to run; the engine's standard scaling still\n"
+            "applies, so the in-game £/month tracks this but isn't 1:1."
+        )
+
         # 0-9 each with up to 2 decimal places, matching RideRating_t's own
         # fixed16_2dp precision (CustomRideLoader.cpp's toRideRating).
         # Defaults (3/2/1) match the engine's own fallback when "ratings" is
@@ -164,6 +172,7 @@ class RideObjectPanel(QWidget):
         form.addRow("Version", self.version_edit)
         form.addRow("Build cost", self.build_cost_spin)
         form.addRow("Guest-cap weight", self.bonus_value_spin)
+        form.addRow("Running cost", self.upkeep_cost_spin)
         form.addRow("Excitement rating", self.rating_excitement_spin)
         form.addRow("Intensity rating", self.rating_intensity_spin)
         form.addRow("Nausea rating", self.rating_nausea_spin)
@@ -183,6 +192,7 @@ class RideObjectPanel(QWidget):
         self.version_edit.textChanged.connect(self._on_field_changed)
         self.build_cost_spin.valueChanged.connect(self._on_field_changed)
         self.bonus_value_spin.valueChanged.connect(self._on_field_changed)
+        self.upkeep_cost_spin.valueChanged.connect(self._on_field_changed)
         self.rating_excitement_spin.valueChanged.connect(self._on_field_changed)
         self.rating_intensity_spin.valueChanged.connect(self._on_field_changed)
         self.rating_nausea_spin.valueChanged.connect(self._on_field_changed)
@@ -207,6 +217,7 @@ class RideObjectPanel(QWidget):
             self.version_edit.setText(project.version)
             self.build_cost_spin.setValue(project.build_cost)
             self.bonus_value_spin.setValue(project.bonus_value)
+            self.upkeep_cost_spin.setValue(project.upkeep_cost)
             self.rating_excitement_spin.setValue(project.rating_excitement)
             self.rating_intensity_spin.setValue(project.rating_intensity)
             self.rating_nausea_spin.setValue(project.rating_nausea)
@@ -256,6 +267,7 @@ class RideObjectPanel(QWidget):
         self.project.version = self.version_edit.text()
         self.project.build_cost = self.build_cost_spin.value()
         self.project.bonus_value = self.bonus_value_spin.value()
+        self.project.upkeep_cost = self.upkeep_cost_spin.value()
         self.project.rating_excitement = self.rating_excitement_spin.value()
         self.project.rating_intensity = self.rating_intensity_spin.value()
         self.project.rating_nausea = self.rating_nausea_spin.value()

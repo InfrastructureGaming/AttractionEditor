@@ -222,6 +222,14 @@ def test_write_object_json_emits_bonus_value(tmp_path):
     assert write_object_json(project)["properties"]["bonusValue"] == 60
 
 
+def test_write_object_json_emits_upkeep_cost(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    assert write_object_json(project)["properties"]["upkeepCost"] == 50  # default = flat_ride_generic base
+
+    project.upkeep_cost = 200
+    assert write_object_json(project)["properties"]["upkeepCost"] == 200
+
+
 def test_colour_schemes_block_multiple_presets(tmp_path):
     """Matches rct2.ride.twist1.json's carColours shape: a list of presets,
     each preset a one-element list wrapping a [Body, Trim, Tertiary] triple."""

@@ -234,6 +234,13 @@ class RideProject:
     # clamped 0-100 (vanilla rides span ~5 for stalls to ~105 for big coasters).
     bonus_value: int = 35
     BONUS_VALUE_MAX = 100
+    # Monthly running cost: replaces the ride type's UpkeepCosts.BaseCost per object
+    # (RideRatings.cpp's RideComputeUpkeep), which dominates a fixed flat ride's upkeep.
+    # Default 50 matches flat_ride_generic (inert until changed); clamped 0-500. Higher =
+    # pricier to run; the engine's standard upkeep scaling (~5/8) still applies on top, so
+    # the in-game £/month figure tracks this but isn't identical.
+    upkeep_cost: int = 50
+    UPKEEP_COST_MAX = 500
     # The breakdowns this ride may suffer, written into object.json's
     # "breakdowns" array (see build/object_json.py + BREAKDOWN_TYPES). The tool
     # always emits this, so it always replaces the ride type's default set: an
@@ -294,6 +301,7 @@ class RideProject:
                     f"Unknown breakdown {breakdown!r}, expected one of {BREAKDOWN_TYPES}"
                 )
         self.bonus_value = max(0, min(self.BONUS_VALUE_MAX, self.bonus_value))
+        self.upkeep_cost = max(0, min(self.UPKEEP_COST_MAX, self.upkeep_cost))
         for layer in self.layers:
             if layer.kind not in LAYER_KINDS:
                 raise ValueError(f"Layer {layer.name!r} has invalid kind {layer.kind!r}, expected one of {LAYER_KINDS}")

@@ -111,6 +111,27 @@ def test_bonus_value_round_trips_clamps_and_back_compat(tmp_path: Path):
     assert RideProject.load(legacy).bonus_value == 35
 
 
+def test_upkeep_cost_round_trips_clamps_and_back_compat(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.upkeep_cost == 50  # default matches flat_ride_generic base
+
+    project.upkeep_cost = 200
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).upkeep_cost == 200
+
+    data = project.to_dict()
+    data["upkeep_cost"] = 9000  # clamps to UPKEEP_COST_MAX
+    clamp_path = tmp_path / "clamp.ridepkg.json"
+    clamp_path.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(clamp_path).upkeep_cost == RideProject.UPKEEP_COST_MAX
+
+    data.pop("upkeep_cost")  # pre-feature project -> default 50
+    legacy = tmp_path / "legacy.ridepkg.json"
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(legacy).upkeep_cost == 50
+
+
 def test_colour_scheme_body_colour_round_trips_and_back_compat(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     project.colour_schemes = [ColourScheme(trim_colour="white", tertiary_colour="white", body_colour="dark_blue")]
