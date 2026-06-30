@@ -117,6 +117,28 @@ def test_all_three_zones(tmp_path):
     assert masks["primary"][0, 2] and not masks["primary"][0, 1]
 
 
+def test_canonical_color_n_naming_maps_to_slot_order(tmp_path):
+    """The Freestyle and everything going forward author zones as COLOR1/2/3,
+    numbered in the engine's colour-slot order: 1=Main/primary, 2=Trim/secondary,
+    3=Tertiary. Regression for the 'colour schemes don't apply at all' report -
+    the reader only knew the old descriptive names."""
+    w, h = 3, 1
+    layers = {
+        "COLOR1": np.array([[1, 0, 0]], dtype=np.float32),
+        "COLOR2": np.array([[0, 1, 0]], dtype=np.float32),
+        "COLOR3": np.array([[0, 0, 1]], dtype=np.float32),
+    }
+    path = tmp_path / "AOVdir0_f0000.exr"
+    _write_zone_exr(path, w, h, layers)
+
+    masks = read_zone_masks(path)
+
+    assert set(masks) == {"primary", "secondary", "tertiary"}
+    assert masks["primary"][0, 0] and not masks["primary"][0, 1]
+    assert masks["secondary"][0, 1] and not masks["secondary"][0, 0]
+    assert masks["tertiary"][0, 2] and not masks["tertiary"][0, 1]
+
+
 def test_unknown_layer_is_ignored(tmp_path):
     w, h = 2, 2
     layers = {

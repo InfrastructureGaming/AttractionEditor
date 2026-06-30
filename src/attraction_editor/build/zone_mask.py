@@ -16,14 +16,21 @@ EXR (float) rather than PNG keeps the stencil exact - no 8-bit quantisation and
 no gamma/view-transform mangling of the values (a PNG zone value of 1.0 came
 back as 0.5 through the display transform during bring-up).
 
-Layer naming maps to our internal remap zones (palette/remap.py):
-  COLOR_TRIM      -> secondary remap (player's Trim colour)
-  COLOR_TERTIARY  -> tertiary remap  (player's Tertiary colour)
-  COLOR_PRIMARY   -> primary remap   (player's Main/body colour) - newly
-                     authorable: the distance-based path could never target the
-                     primary range because openrct2-cli's -m closest excludes
-                     it, but an explicit mask lets the zone-constrained
-                     quantiser place those pixels deliberately.
+Layer naming maps to our internal remap zones (palette/remap.py). The canonical
+names are COLOR<n>, numbered in the engine's colour-slot order (the same order
+the ride colour pickers and GenericFlatRide paint use), which reads more
+naturally than the role names and extends cleanly if a 4th remap colour is ever
+added (COLOR4 beats "quaternary"):
+  COLOR1  -> primary remap   (player's Main/body colour)
+  COLOR2  -> secondary remap (player's Trim / "Additional Color 1")
+  COLOR3  -> tertiary remap  (player's Tertiary / "Additional Color 2")
+The primary zone is newly authorable: the distance-based path could never target
+the primary range because openrct2-cli's -m closest excludes it, but an explicit
+mask lets the zone-constrained quantiser place those pixels deliberately.
+
+The earlier descriptive names (COLOR_PRIMARY/COLOR_TRIM/COLOR_TERTIARY, used by
+the first Tilt-A-Whirl zone passes) are still recognised so those EXRs keep
+building until re-authored with COLOR<n>.
 """
 
 from __future__ import annotations
@@ -35,9 +42,14 @@ import numpy as np
 # EXR layer name -> internal remap-zone key (matches the zone vocabulary the
 # dithering/classification code uses).
 ZONE_LAYER_NAMES = {
+    # Canonical COLOR<n> naming (n = engine colour-slot order).
+    "COLOR1": "primary",
+    "COLOR2": "secondary",
+    "COLOR3": "tertiary",
+    # Legacy descriptive names (early Tilt-A-Whirl passes) - kept for back-compat.
+    "COLOR_PRIMARY": "primary",
     "COLOR_TRIM": "secondary",
     "COLOR_TERTIARY": "tertiary",
-    "COLOR_PRIMARY": "primary",
 }
 
 # Authored masks are raw 0/1 with no antialiasing, so any sensible cut works;
