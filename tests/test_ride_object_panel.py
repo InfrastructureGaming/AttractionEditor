@@ -80,6 +80,19 @@ def test_editing_fields_writes_to_project(qtbot, tmp_path):
     assert project.rating_nausea == 3
 
 
+def test_bonus_value_spin_loads_and_commits(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+    assert panel.bonus_value_spin.value() == 35  # default
+
+    panel.bonus_value_spin.setValue(60)
+    assert project.bonus_value == 60
+
+
+def test_bonus_value_spin_clamped_to_max(qtbot, tmp_path):
+    panel, _project = _panel_with_project(qtbot, tmp_path)
+    assert panel.bonus_value_spin.maximum() == 100
+
+
 def test_draw_order_spin_clamped_to_valid_range(qtbot, tmp_path):
     panel, _project = _panel_with_project(qtbot, tmp_path)
     assert panel.car_draw_order_spin.maximum() == 15

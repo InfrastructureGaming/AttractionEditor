@@ -88,6 +88,29 @@ def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
     assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
 
 
+def test_bonus_value_round_trips_clamps_and_back_compat(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.bonus_value == 35  # default matches the flat_ride_generic RTD
+
+    project.bonus_value = 70
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).bonus_value == 70
+
+    # Out-of-range values clamp to 0..BONUS_VALUE_MAX on load.
+    data = project.to_dict()
+    data["bonus_value"] = 500
+    clamp_path = tmp_path / "clamp.ridepkg.json"
+    clamp_path.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(clamp_path).bonus_value == RideProject.BONUS_VALUE_MAX
+
+    # A project saved before bonus_value existed defaults to 35.
+    data.pop("bonus_value")
+    legacy = tmp_path / "legacy.ridepkg.json"
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(legacy).bonus_value == 35
+
+
 def test_colour_scheme_body_colour_round_trips_and_back_compat(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     project.colour_schemes = [ColourScheme(trim_colour="white", tertiary_colour="white", body_colour="dark_blue")]

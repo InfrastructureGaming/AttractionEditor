@@ -226,6 +226,14 @@ class RideProject:
     rating_excitement: float = 3.0
     rating_intensity: float = 2.0
     rating_nausea: float = 1.0
+    # How much an open, working copy of this ride raises the park's soft guest
+    # cap (engine sums BonusValue over all open rides - see Park.cpp's
+    # calculateSuggestedMaxGuests). Written into object.json as "bonusValue" and
+    # applied per-object via RideObjectEntry::bonusValueOverride. Default 35
+    # matches the flat_ride_generic RTD exactly (so it's inert until changed);
+    # clamped 0-100 (vanilla rides span ~5 for stalls to ~105 for big coasters).
+    bonus_value: int = 35
+    BONUS_VALUE_MAX = 100
     # The breakdowns this ride may suffer, written into object.json's
     # "breakdowns" array (see build/object_json.py + BREAKDOWN_TYPES). The tool
     # always emits this, so it always replaces the ride type's default set: an
@@ -285,6 +293,7 @@ class RideProject:
                 raise ValueError(
                     f"Unknown breakdown {breakdown!r}, expected one of {BREAKDOWN_TYPES}"
                 )
+        self.bonus_value = max(0, min(self.BONUS_VALUE_MAX, self.bonus_value))
         for layer in self.layers:
             if layer.kind not in LAYER_KINDS:
                 raise ValueError(f"Layer {layer.name!r} has invalid kind {layer.kind!r}, expected one of {LAYER_KINDS}")
