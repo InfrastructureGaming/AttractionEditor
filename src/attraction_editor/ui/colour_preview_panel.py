@@ -78,6 +78,7 @@ class ColourPreviewPanel(QWidget):
         # Swatch grids, not text lists - the engine's colour names are hard to
         # picture (see ui/colour_swatch_picker.py). API-compatible with the
         # QComboBox they replaced (currentText/setCurrentText/currentTextChanged).
+        self.body_combo = ColourSwatchPicker()  # Main colour / primary remap zone
         self.trim_combo = ColourSwatchPicker()
         self.tertiary_combo = ColourSwatchPicker()
 
@@ -100,6 +101,7 @@ class ColourPreviewPanel(QWidget):
         )
 
         form = QFormLayout()
+        form.addRow("Main colour", self.body_combo)
         form.addRow("Trim colour", self.trim_combo)
         form.addRow("Trim catch tolerance", self.trim_tolerance_spin)
         form.addRow("Tertiary colour", self.tertiary_combo)
@@ -151,6 +153,7 @@ class ColourPreviewPanel(QWidget):
         add_btn.clicked.connect(self._on_add_scheme)
         remove_btn.clicked.connect(self._on_remove_scheme)
 
+        self.body_combo.currentTextChanged.connect(self._on_field_changed)
         self.trim_combo.currentTextChanged.connect(self._on_field_changed)
         self.tertiary_combo.currentTextChanged.connect(self._on_field_changed)
 
@@ -211,7 +214,9 @@ class ColourPreviewPanel(QWidget):
 
     @staticmethod
     def _label_for(scheme: ColourScheme) -> str:
-        return f"Trim={scheme.trim_colour}, Tertiary={scheme.tertiary_colour}"
+        # body_colour None falls back to Trim when emitted (see object_json), so
+        # show that effective Main colour rather than a bare "None".
+        return f"Main={scheme.body_colour or scheme.trim_colour}, Trim={scheme.trim_colour}, Tertiary={scheme.tertiary_colour}"
 
     def _current_scheme(self) -> ColourScheme | None:
         if self.project is None:
@@ -228,9 +233,13 @@ class ColourPreviewPanel(QWidget):
         self._loading = True
         try:
             if scheme is None:
+                self.body_combo.setCurrentText("white")
                 self.trim_combo.setCurrentText("white")
                 self.tertiary_combo.setCurrentText("white")
             else:
+                # body_colour may be None on older schemes; show the effective
+                # Main (the Trim fallback) so the picker has a real value.
+                self.body_combo.setCurrentText(scheme.body_colour or scheme.trim_colour)
                 self.trim_combo.setCurrentText(scheme.trim_colour)
                 self.tertiary_combo.setCurrentText(scheme.tertiary_colour)
         finally:
@@ -242,6 +251,7 @@ class ColourPreviewPanel(QWidget):
         scheme = self._current_scheme()
         if scheme is None:
             return
+        scheme.body_colour = self.body_combo.currentText()
         scheme.trim_colour = self.trim_combo.currentText()
         scheme.tertiary_colour = self.tertiary_combo.currentText()
         self.scheme_list.item(self.scheme_list.currentRow()).setText(self._label_for(scheme))

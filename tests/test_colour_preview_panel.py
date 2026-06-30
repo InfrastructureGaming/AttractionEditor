@@ -32,6 +32,18 @@ def _panel_with_project(qtbot, tmp_path, *, with_preview: bool = False):
     return panel, project
 
 
+def test_main_colour_picker_loads_effective_main_and_commits(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+    panel.scheme_list.setCurrentRow(0)
+
+    # scheme 0 has body_colour None -> the picker shows the Trim fallback (the
+    # effective Main colour), not a blank.
+    assert panel.body_combo.currentText() == "bright_red"
+
+    panel.body_combo.setCurrentText("dark_blue")
+    assert project.colour_schemes[0].body_colour == "dark_blue"
+
+
 def test_active_scheme_starts_none(qtbot, tmp_path):
     panel, _project = _panel_with_project(qtbot, tmp_path)
     assert panel.get_active_scheme() is None
