@@ -19,6 +19,7 @@ from attraction_editor.palette.remap import (
     REMAP_LENGTH,
     SECONDARY_REMAP_START,
     TERTIARY_REMAP_START,
+    load_colour_ramps,
     load_standard_palette,
 )
 from attraction_editor.sprites.scanner import frame_path, zone_mask_path
@@ -74,6 +75,28 @@ def test_render_layer_frame_uses_authored_zone_masks_end_to_end(tmp_path):
 
     assert _palette_index_of(out[0, 0]) in primary_idx  # masked (top) pixel
     assert _palette_index_of(out[h - 1, 0]) not in primary_idx  # unmasked (bottom) pixel
+
+
+def test_zone_pass_layer_preview_recolours_primary_to_body(tmp_path):
+    """A zone-pass layer's preview takes the index path even with dither=False
+    (greyscale zones are invisible to the distance path), and scheme.body_colour
+    recolours the primary zone to the Main colour - what ships in-game."""
+    project = make_synthetic_project(tmp_path)
+    layer = project.layers[0]
+    layer.zone_pass_dir = layer.sprite_dir
+    zone_dir = project.project_dir / layer.zone_pass_dir
+    w, h = FRAME_SIZE
+    primary = np.zeros((h, w), dtype=np.float32)
+    primary[: h // 2, :] = 1.0  # top half = primary/Main zone
+    _write_single_part_zone_exr(zone_mask_path(zone_dir, 0, 0), w, h, {"COLOR_PRIMARY": primary})
+
+    scheme = ColourScheme(trim_colour="white", tertiary_colour="white", body_colour="bright_red")
+    out = np.asarray(render_layer_frame_preview(project, layer, 0, 0, scheme, dither=False).convert("RGBA"))
+
+    palette = load_standard_palette()
+    body_ramp = {tuple(palette[i]) for i in load_colour_ramps()["bright_red"]}
+    top_pixels = {tuple(out[0, x][:3]) for x in range(w)}
+    assert top_pixels <= body_ramp  # the primary zone now shows the Main (body) colour
 
 
 def test_render_layer_frame_without_zone_pass_is_unaffected(tmp_path):

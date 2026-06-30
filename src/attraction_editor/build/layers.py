@@ -131,21 +131,36 @@ def render_layer_frame_preview(
     EEVEE colour - so this still uses remap_preview's distance-based
     classification, with project's catch tolerances applied exactly as the
     real build would catch them.
+
+    A layer with an authored zone pass (Layer.zone_pass_dir) ALWAYS takes the
+    index path regardless of `dither`: its zones are rendered greyscale, so
+    remap_preview's distance classification can't find them - only dithering
+    (which loads the zone masks and lays down the exact ramp pixels) then
+    recolouring by index reproduces what ships. `scheme.body_colour` recolours
+    the primary (Main) zone, unlocked by that same zone pass.
     """
     is_static = layer.kind == "static"
-    cache_key = (layer.sprite_dir, direction, scheme.trim_colour, scheme.tertiary_colour, dither) if is_static else None
+    use_index_path = dither or bool(layer.zone_pass_dir)
+    cache_key = (
+        (layer.sprite_dir, direction, scheme.trim_colour, scheme.tertiary_colour, scheme.body_colour, use_index_path)
+        if is_static
+        else None
+    )
     if cache is not None and cache_key is not None and cache_key in cache:
         return cache[cache_key]
 
-    if dither:
+    if use_index_path:
         dithered = render_layer_frame(project, layer, direction, frame, dither=True, cache=cache)
-        result = recolour_dithered_zones(dithered, scheme.trim_colour, scheme.tertiary_colour)
+        result = recolour_dithered_zones(
+            dithered, scheme.trim_colour, scheme.tertiary_colour, body_colour=scheme.body_colour
+        )
     else:
         img = _load_layer_source(project, layer, direction, frame)
         result = remap_preview(
             img,
             scheme.trim_colour,
             scheme.tertiary_colour,
+            body_colour=scheme.body_colour,
             trim_tolerance=project.trim_catch_tolerance,
             tertiary_tolerance=project.tertiary_catch_tolerance,
         )
