@@ -88,6 +88,22 @@ def test_load_back_compat_for_phases_without_play_reverse(tmp_path: Path):
     assert all(not phase.play_reverse for phase in loaded.programs[0].phases)
 
 
+def test_colour_scheme_body_colour_round_trips_and_back_compat(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    project.colour_schemes = [ColourScheme(trim_colour="white", tertiary_colour="white", body_colour="dark_blue")]
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).colour_schemes[0].body_colour == "dark_blue"
+
+    # A scheme saved before body_colour existed loads as None.
+    data = project.to_dict()
+    for cs in data["colour_schemes"]:
+        cs.pop("body_colour")
+    legacy = tmp_path / "legacy.ridepkg.json"
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(legacy).colour_schemes[0].body_colour is None
+
+
 def test_layer_zone_pass_dir_round_trips_and_back_compat(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     project.layers[0].zone_pass_dir = "Frames/Core"  # masks alongside the beauty frames
@@ -270,8 +286,8 @@ def test_colour_schemes_round_trip_through_to_dict(tmp_path: Path):
     data = project.to_dict()
 
     assert data["colour_schemes"] == [
-        {"trim_colour": "bright_red", "tertiary_colour": "white"},
-        {"trim_colour": "moss_green", "tertiary_colour": "yellow"},
+        {"trim_colour": "bright_red", "tertiary_colour": "white", "body_colour": None},
+        {"trim_colour": "moss_green", "tertiary_colour": "yellow", "body_colour": None},
     ]
 
 

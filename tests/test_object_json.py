@@ -205,6 +205,15 @@ def test_colour_schemes_block_single_scheme(tmp_path):
     assert colour_schemes_block(project) == [[["bright_red", "bright_red", "white"]]]
 
 
+def test_colour_schemes_block_emits_distinct_body_colour(tmp_path):
+    """When body_colour is set, the triple carries a distinct Main colour
+    (Body), driving the primary remap zone - not the old Trim-as-Body default."""
+    project = make_synthetic_project(tmp_path)
+    project.colour_schemes = [ColourScheme(trim_colour="bright_red", tertiary_colour="white", body_colour="dark_blue")]
+
+    assert colour_schemes_block(project) == [[["dark_blue", "bright_red", "white"]]]
+
+
 def test_colour_schemes_block_multiple_presets(tmp_path):
     """Matches rct2.ride.twist1.json's carColours shape: a list of presets,
     each preset a one-element list wrapping a [Body, Trim, Tertiary] triple."""

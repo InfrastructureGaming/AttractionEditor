@@ -110,12 +110,15 @@ def colour_schemes_block(project: RideProject) -> list:
     Schema (matching rct2.ride.twist1.json's carColours exactly): a list of
     presets, each preset a one-element list wrapping a single [Body, Trim,
     Tertiary] triple - ReadJsonCarColours only ever reads the first car's
-    triple out of each preset regardless of car count. Body has no visible
-    effect on our sprites (see model.project.ColourScheme) so it's defaulted
-    to the Trim colour - inert, but keeps the JSON self-consistent rather
-    than an arbitrary placeholder.
+    triple out of each preset regardless of car count. Body now drives the
+    primary remap zone (the player's Main colour), reachable since the zone-pass
+    pipeline (see model.project.ColourScheme); a scheme with no body_colour set
+    falls back to its Trim colour, preserving the old two-colour default exactly.
     """
-    return [[[scheme.trim_colour, scheme.trim_colour, scheme.tertiary_colour]] for scheme in project.colour_schemes]
+    return [
+        [[scheme.body_colour or scheme.trim_colour, scheme.trim_colour, scheme.tertiary_colour]]
+        for scheme in project.colour_schemes
+    ]
 
 
 def cars_block(project: RideProject) -> dict:

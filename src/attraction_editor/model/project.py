@@ -135,20 +135,24 @@ class ColourScheme:
     ride stays fully recolourable by the player afterward - this is NOT a
     colour baked into the sprites, just a starting point.
 
-    Field names match the engine's actual VehicleColour terminology, verified
-    against VehiclePaint.cpp/ImageId.hpp/PaletteIndex.h: trim_colour drives
-    the secondary remap zone (palette indices 202-213, reference shade
-    "bright_pink" in Blender), tertiary_colour drives the tertiary remap zone
-    (indices 46-57, reference shade "yellow"). There is deliberately no
-    body_colour/primary field: the engine's primary remap zone (243-254) is
-    excluded from openrct2-cli's `-m closest` nearest-match targets
-    (ImageImporter::IsChangablePixel, drawing/ImageImporter.cpp), so a
-    PNG-authored custom ride has no way to put a pixel there at all - Body
-    colour recolouring isn't achievable through this import pipeline.
+    Field names match the engine's VehicleColour terminology: body_colour drives
+    the primary remap zone (indices 243-254, the player's "Main Color"),
+    trim_colour the secondary zone (202-213, "Additional Color 1"),
+    tertiary_colour the tertiary zone (46-57, "Additional Color 2") - the
+    [Body, Trim, Tertiary] order the engine paints with (GenericFlatRide.cpp).
+
+    body_colour was once impossible: the primary range (243-254) is excluded
+    from openrct2-cli's `-m closest` targets (ImageImporter::IsChangablePixel),
+    so a Blender render couldn't put a pixel there. The zone-pass authoring path
+    (an authored COLOR_PRIMARY mask + snap_to_palette preserving exact 243-254
+    pixels) now reaches it, so the Main colour is genuinely recolourable. It's
+    optional for back-compat: None falls back to trim_colour when emitted (see
+    build/object_json.colour_schemes_block), matching the old two-colour default.
     """
 
     trim_colour: str
     tertiary_colour: str
+    body_colour: str | None = None
 
 
 @dataclass
