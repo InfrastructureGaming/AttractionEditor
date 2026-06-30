@@ -36,6 +36,30 @@ def test_colour_swatch_rgb():
     assert [r, g, b] == palette[middle]
 
 
+def test_extended_colour_swatches_are_correct():
+    """Regression: the extended colours OpenRCT2 added beyond RCT2's original 32
+    weren't in g1.dat, so the old extractor produced garbage ramps for them -
+    e.g. bordeaux_red_dark rendered light gray, orange_light dark maroon,
+    dull_brown_light navy. colour_ramps.json now comes from the authoritative
+    resources/palettes/map_base PNGs, so their swatches are sane. Pin the three
+    reported cases to their correct mid-shades."""
+    assert colour_swatch_rgb("bordeaux_red_dark") == (111, 15, 15)  # was (91, 115, 115) gray
+    assert colour_swatch_rgb("orange_light") == (255, 163, 79)  # was (35, 0, 0) maroon
+    assert colour_swatch_rgb("dull_brown_light") == (187, 171, 147)  # was (15, 19, 55) navy
+
+
+def test_all_colour_ramps_are_valid_12_entry_palette_indices():
+    """Every colour (all 56) must map to a 12-entry ramp of in-range palette
+    indices - the failure mode that let the extended colours ship garbage was an
+    extractor that read past valid data without this guard."""
+    palette = load_standard_palette()
+    ramps = load_colour_ramps()
+    assert len(ramps) == 56
+    for name, ramp in ramps.items():
+        assert len(ramp) == 12, name
+        assert all(0 <= i < len(palette) for i in ramp), name
+
+
 def test_srgb_to_linear_known_values():
     # Fixed points 0 and 1, and the canonical mid-grey: sRGB 0.5 -> ~0.214 linear
     # (this gap is exactly the "dithering too dark" error linear-light fixes).

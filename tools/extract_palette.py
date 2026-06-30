@@ -1,35 +1,39 @@
 """One-time offline tool: writes standard_palette.json (ported from
 OpenRCT2's StandardPalette in ImageImporter.h) and colour_ramps.json (the
-54x12 colour-remap ramps extracted from RCT2's base g1.dat).
+56x12 colour-remap ramps), extracted from OpenRCT2's authoritative palette-map
+source images.
 
 Usage:
-    python tools/extract_palette.py <path-to-g1.dat>
+    python tools/extract_palette.py <path-to-OpenRCT2/resources/palettes/map_base>
 
 Background: OpenRCT2 recolours a "Colour" by copying a 12-entry palette-index
 ramp into the secondary (202-213) / tertiary (46-57) / primary (243-254)
 remap ranges (see ColourMap.cpp / Drawing.Sprite.cpp::GfxDrawSpriteGetPalette).
-That ramp is G1 sprite (SPR_G1_PALETTE_2_START + colour_enum_value)'s pixel
-data at byte offsets 243-254 - baked sprite data in g1.dat, not available as
-C++ source, hence this offline extractor.
+Each colour's remap map is built from resources/palettes/map_base/
+palette_map_<colour>.png - a 256x1 indexed image where pixel[i] is the palette
+colour that source index i maps to; the primary range (243-254) holds the
+colour's 12 shades. This is the build source for all 56 colours.
+
+NB: an earlier version read these ramps from RCT2's g1.dat at sprite
+SPR_G1_PALETTE_2_START + colour. That only covers the original 32 RCT2 colours;
+the 24 extended OpenRCT2 colours (dark_olive_dark .. void) aren't in g1.dat, so
+that path produced garbage ramps for them (gray/maroon/navy swatches). The
+map_base PNGs cover all 56 consistently and reproduce the original 32 exactly.
 """
 
 from __future__ import annotations
 
 import json
-import struct
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "src" / "attraction_editor" / "palette"
 
-SPR_G1_PALETTE_2_START = 4915
 COLOUR_NUM_TOTAL = 56
 RAMP_START = 243  # PaletteIndex::primaryRemap0
 RAMP_LENGTH = 12  # kPaletteLengthRemap
-
-G1_HEADER_FORMAT = "<II"  # numEntries, totalSize
-G1_ELEMENT_FORMAT = "<IhhhhHH"  # offset, width, height, xOffset, yOffset, flags, zoomedOffset
-G1_ELEMENT_SIZE = struct.calcsize(G1_ELEMENT_FORMAT)
 
 # Colour enum order (0-55), from Colour.h / Colour.cpp's kLookupTable.
 COLOUR_NAMES = [
@@ -128,27 +132,21 @@ STANDARD_PALETTE_RGB: list[list[int]] = [
 assert len(STANDARD_PALETTE_RGB) == 256
 
 
-def extract_colour_ramps(g1_path: Path) -> dict[str, list[int]]:
-    data = g1_path.read_bytes()
-
-    num_entries, total_size = struct.unpack_from(G1_HEADER_FORMAT, data, 0)
-    header_size = struct.calcsize(G1_HEADER_FORMAT)
-    if num_entries < SPR_G1_PALETTE_2_START + COLOUR_NUM_TOTAL:
-        raise ValueError(f"g1.dat only has {num_entries} entries, need at least "
-                         f"{SPR_G1_PALETTE_2_START + COLOUR_NUM_TOTAL}")
-
-    elements_start = header_size
-    pixel_data_start = elements_start + num_entries * G1_ELEMENT_SIZE
+def extract_colour_ramps(palette_map_dir: Path) -> dict[str, list[int]]:
+    # RGB -> standard-palette index. The palette has no duplicate RGBs in the
+    # remap ranges, so an exact lookup recovers each shade's index unambiguously.
+    rgb_to_index = {tuple(rgb): i for i, rgb in enumerate(STANDARD_PALETTE_RGB)}
 
     ramps: dict[str, list[int]] = {}
-    for colour_index, name in enumerate(COLOUR_NAMES):
-        sprite_index = SPR_G1_PALETTE_2_START + colour_index
-        element_offset = elements_start + sprite_index * G1_ELEMENT_SIZE
-        offset, _width, _height, _x, _y, _flags, _zoom = struct.unpack_from(
-            G1_ELEMENT_FORMAT, data, element_offset
-        )
-        ramp_start = pixel_data_start + offset + RAMP_START
-        ramp = list(data[ramp_start : ramp_start + RAMP_LENGTH])
+    for name in COLOUR_NAMES:
+        png_path = palette_map_dir / f"palette_map_{name}.png"
+        pixels = list(Image.open(png_path).convert("RGB").getdata())  # 256 entries, the remap map
+        ramp = []
+        for rgb in pixels[RAMP_START : RAMP_START + RAMP_LENGTH]:
+            index = rgb_to_index.get(rgb)
+            if index is None:
+                raise ValueError(f"{png_path.name}: shade {rgb} is not in StandardPalette")
+            ramp.append(index)
         ramps[name] = ramp
 
     return ramps
@@ -156,11 +154,11 @@ def extract_colour_ramps(g1_path: Path) -> dict[str, list[int]]:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        print("Usage: python tools/extract_palette.py <path-to-g1.dat>")
+        print("Usage: python tools/extract_palette.py <path-to-OpenRCT2/resources/palettes/map_base>")
         raise SystemExit(1)
 
-    g1_path = Path(sys.argv[1])
-    ramps = extract_colour_ramps(g1_path)
+    palette_map_dir = Path(sys.argv[1])
+    ramps = extract_colour_ramps(palette_map_dir)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "colour_ramps.json").write_text(json.dumps(ramps, indent=2), encoding="utf-8")
