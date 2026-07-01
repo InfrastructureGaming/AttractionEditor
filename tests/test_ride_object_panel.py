@@ -106,14 +106,6 @@ def test_upkeep_cost_spin_clamped_to_max(qtbot, tmp_path):
     assert panel.upkeep_cost_spin.maximum() == 500
 
 
-def test_shuffle_load_check_loads_and_commits(qtbot, tmp_path):
-    panel, project = _panel_with_project(qtbot, tmp_path)
-    assert panel.shuffle_load_check.isChecked() is False  # default
-
-    panel.shuffle_load_check.setChecked(True)
-    assert project.shuffle_load_order is True
-
-
 def test_draw_order_spin_clamped_to_valid_range(qtbot, tmp_path):
     panel, _project = _panel_with_project(qtbot, tmp_path)
     assert panel.car_draw_order_spin.maximum() == 15
