@@ -142,7 +142,7 @@ class AnchorEditorPanel(QWidget):
         self.y_spin.setRange(-2000, 2000)
 
         self.show_grid_check = QCheckBox("Show footprint grid")
-        self.show_grid_check.setChecked(True)
+        self.show_grid_check.setChecked(False)  # off by default - opt in when checking plot clipping
         self.show_grid_check.setToolTip(
             "Pixel-accurate isometric outline of the ride's reserved land footprint\n"
             "(Project section's Footprint width/length), centered on this direction's\n"

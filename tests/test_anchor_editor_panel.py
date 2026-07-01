@@ -74,12 +74,18 @@ def test_footprint_grid_item_bounding_rect_matches_diamond_extent():
     assert rect.height() == 192 + 2 * 2
 
 
-def test_footprint_grid_shown_by_default_and_centered_on_anchor(qtbot, tmp_path):
+def test_footprint_grid_hidden_by_default_shown_and_centered_when_enabled(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)
     project = make_synthetic_project(tmp_path)
 
     window._set_project(project, None)
+
+    # Off by default - the grid is an opt-in aid for checking plot clipping.
+    grids = [item for item in window.preview_widget.scene.items() if isinstance(item, _FootprintGridItem)]
+    assert grids == []
+
+    window.anchor_editor_panel.show_grid_check.setChecked(True)
 
     grids = [item for item in window.preview_widget.scene.items() if isinstance(item, _FootprintGridItem)]
     assert len(grids) == 1
@@ -93,6 +99,7 @@ def test_unchecking_show_grid_removes_the_overlay(qtbot, tmp_path):
     qtbot.addWidget(window)
     project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
+    window.anchor_editor_panel.show_grid_check.setChecked(True)  # off by default; turn on first
 
     window.anchor_editor_panel.show_grid_check.setChecked(False)
 
@@ -109,6 +116,7 @@ def test_preview_scene_rect_expands_to_include_the_footprint_grid(qtbot, tmp_pat
     project = make_synthetic_project(tmp_path)
 
     window._set_project(project, None)
+    window.anchor_editor_panel.show_grid_check.setChecked(True)  # grid is off by default
 
     scene_rect = window.preview_widget.scene.sceneRect()
     assert scene_rect.width() > 80
