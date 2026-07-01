@@ -210,6 +210,15 @@ class RideProject:
     car_tab_offset: int = 0
     car_tab_scale: float = 0.0
     car_num_seats: int = 0
+    # Per-seat "walk here before teleporting to the seat" offsets, one int8 per
+    # seat index within a gondola car (typically 2: seat A, seat B). Emitted as
+    # object.json cars.loadingPositions and read into carEntry.peep_loading_positions;
+    # the engine shifts the rider's walk destination by this many world units along
+    # the loading axis (Guest.cpp's PeepUpdateRideLeaveEntranceDefault), and reverses
+    # it on the way out to the player-placed exit. Empty = default (walk to the
+    # vehicle centre, today's behaviour). Each value clamped to the int8 range.
+    loading_positions: list[int] = field(default_factory=list)
+    LOADING_POSITION_LIMIT = 127
     car_visual: int = 1
     car_draw_order: int = 6
     capacity_text: str = ""  # strings.capacity, e.g. "24 passengers" - free text, not derived from car_num_seats
@@ -302,6 +311,8 @@ class RideProject:
                 )
         self.bonus_value = max(0, min(self.BONUS_VALUE_MAX, self.bonus_value))
         self.upkeep_cost = max(0, min(self.UPKEEP_COST_MAX, self.upkeep_cost))
+        lim = self.LOADING_POSITION_LIMIT
+        self.loading_positions = [max(-lim - 1, min(lim, int(p))) for p in self.loading_positions]
         for layer in self.layers:
             if layer.kind not in LAYER_KINDS:
                 raise ValueError(f"Layer {layer.name!r} has invalid kind {layer.kind!r}, expected one of {LAYER_KINDS}")

@@ -157,7 +157,7 @@ def cars_block(project: RideProject) -> dict:
     set, so they're inert for every ride this tool builds.
     """
     left, right, above, below = _sprite_extents(project)
-    return {
+    block = {
         "rotationFrameMask": project.rotation_frame_mask,
         "tabOffset": project.car_tab_offset,
         "tabScale": project.car_tab_scale,
@@ -172,6 +172,12 @@ def cars_block(project: RideProject) -> dict:
         "hasAdditionalColour1": True,
         "hasAdditionalColour2": True,
     }
+    # Per-seat walk-to offsets (peep_loading_positions): where a rider walks on the
+    # base before teleporting to its seat, reversed on the way out to the exit. Only
+    # emitted when authored - absent = the engine's default (walk to vehicle centre).
+    if project.loading_positions:
+        block["loadingPositions"] = list(project.loading_positions)
+    return block
 
 
 def write_object_json(project: RideProject) -> dict:

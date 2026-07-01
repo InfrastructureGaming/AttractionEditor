@@ -222,6 +222,14 @@ def test_write_object_json_emits_bonus_value(tmp_path):
     assert write_object_json(project)["properties"]["bonusValue"] == 60
 
 
+def test_loading_positions_emitted_only_when_authored(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    assert "loadingPositions" not in cars_block(project)  # default = walk to centre, absent
+
+    project.loading_positions = [16, -16]
+    assert cars_block(project)["loadingPositions"] == [16, -16]
+
+
 def test_write_object_json_emits_upkeep_cost(tmp_path):
     project = make_synthetic_project(tmp_path)
     assert write_object_json(project)["properties"]["upkeepCost"] == 50  # default = flat_ride_generic base

@@ -106,6 +106,25 @@ def test_upkeep_cost_spin_clamped_to_max(qtbot, tmp_path):
     assert panel.upkeep_cost_spin.maximum() == 500
 
 
+def test_loading_position_spins_load_and_commit(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+    assert panel.loading_pos_a_spin.value() == 0
+    assert project.loading_positions == []  # default
+
+    panel.loading_pos_a_spin.setValue(16)
+    panel.loading_pos_b_spin.setValue(-16)
+    assert project.loading_positions == [16, -16]
+
+
+def test_loading_positions_cleared_when_both_zero(qtbot, tmp_path):
+    panel, project = _panel_with_project(qtbot, tmp_path)
+    panel.loading_pos_a_spin.setValue(16)
+    assert project.loading_positions == [16, 0]
+
+    panel.loading_pos_a_spin.setValue(0)
+    assert project.loading_positions == []  # both zero -> default, nothing emitted
+
+
 def test_draw_order_spin_clamped_to_valid_range(qtbot, tmp_path):
     panel, _project = _panel_with_project(qtbot, tmp_path)
     assert panel.car_draw_order_spin.maximum() == 15

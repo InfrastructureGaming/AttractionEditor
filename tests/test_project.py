@@ -128,6 +128,22 @@ def test_load_ignores_unknown_keys(tmp_path: Path):
     assert not hasattr(loaded, "shuffle_load_order")
 
 
+def test_loading_positions_round_trip_and_int8_clamp(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.loading_positions == []  # default: walk to centre
+
+    project.loading_positions = [10, -20]
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).loading_positions == [10, -20]
+
+    data = project.to_dict()
+    data["loading_positions"] = [500, -500]  # clamps to the int8 range
+    clamp_path = tmp_path / "clamp.ridepkg.json"
+    clamp_path.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(clamp_path).loading_positions == [127, -128]
+
+
 def test_upkeep_cost_round_trips_clamps_and_back_compat(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.upkeep_cost == 50  # default matches flat_ride_generic base

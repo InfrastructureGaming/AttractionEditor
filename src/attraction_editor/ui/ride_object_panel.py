@@ -81,6 +81,22 @@ class RideObjectPanel(QWidget):
         self.car_tab_scale_spin.setSingleStep(0.1)
         self.car_num_seats_spin = QSpinBox()
         self.car_num_seats_spin.setRange(0, 255)
+
+        # Per-seat walk-to offset: how far (world units) along the loading axis a
+        # rider walks from the ride centre before teleporting to its seat (reversed
+        # on the way out). 0 = ride centre (default). See RideProject.loading_positions.
+        _pos_lim = RideProject.LOADING_POSITION_LIMIT
+        self.loading_pos_a_spin = QSpinBox()
+        self.loading_pos_a_spin.setRange(-_pos_lim - 1, _pos_lim)
+        self.loading_pos_a_spin.setToolTip(
+            "Seat A rider's walk-to offset from the ride centre, in world units,\n"
+            "before teleporting to the seat (reversed on the way out to the exit).\n"
+            "0 = centre. ~32 = one tile."
+        )
+        self.loading_pos_b_spin = QSpinBox()
+        self.loading_pos_b_spin.setRange(-_pos_lim - 1, _pos_lim)
+        self.loading_pos_b_spin.setToolTip("Seat B rider's walk-to offset (see Seat A).")
+
         self.car_visual_spin = QSpinBox()
         self.car_visual_spin.setRange(0, 255)
         self.car_draw_order_spin = QSpinBox()
@@ -165,6 +181,8 @@ class RideObjectPanel(QWidget):
         form.addRow("Car tab offset", self.car_tab_offset_spin)
         form.addRow("Car tab scale", self.car_tab_scale_spin)
         form.addRow("Num seats", self.car_num_seats_spin)
+        form.addRow("Rider walk offset A", self.loading_pos_a_spin)
+        form.addRow("Rider walk offset B", self.loading_pos_b_spin)
         form.addRow("Car visual", self.car_visual_spin)
         form.addRow("Draw order", self.car_draw_order_spin)
         form.addRow("Capacity text", self.capacity_text_edit)
@@ -185,6 +203,8 @@ class RideObjectPanel(QWidget):
         self.car_tab_offset_spin.valueChanged.connect(self._on_field_changed)
         self.car_tab_scale_spin.valueChanged.connect(self._on_field_changed)
         self.car_num_seats_spin.valueChanged.connect(self._on_field_changed)
+        self.loading_pos_a_spin.valueChanged.connect(self._on_field_changed)
+        self.loading_pos_b_spin.valueChanged.connect(self._on_field_changed)
         self.car_visual_spin.valueChanged.connect(self._on_field_changed)
         self.car_draw_order_spin.valueChanged.connect(self._on_field_changed)
         self.capacity_text_edit.textChanged.connect(self._on_field_changed)
@@ -210,6 +230,9 @@ class RideObjectPanel(QWidget):
             self.car_tab_offset_spin.setValue(project.car_tab_offset)
             self.car_tab_scale_spin.setValue(project.car_tab_scale)
             self.car_num_seats_spin.setValue(project.car_num_seats)
+            positions = project.loading_positions
+            self.loading_pos_a_spin.setValue(positions[0] if len(positions) > 0 else 0)
+            self.loading_pos_b_spin.setValue(positions[1] if len(positions) > 1 else 0)
             self.car_visual_spin.setValue(project.car_visual)
             self.car_draw_order_spin.setValue(project.car_draw_order)
             self.capacity_text_edit.setText(project.capacity_text)
@@ -260,6 +283,10 @@ class RideObjectPanel(QWidget):
         self.project.car_tab_offset = self.car_tab_offset_spin.value()
         self.project.car_tab_scale = self.car_tab_scale_spin.value()
         self.project.car_num_seats = self.car_num_seats_spin.value()
+        pos_a = self.loading_pos_a_spin.value()
+        pos_b = self.loading_pos_b_spin.value()
+        # Both zero == default (walk to centre): store empty so nothing is emitted.
+        self.project.loading_positions = [pos_a, pos_b] if (pos_a or pos_b) else []
         self.project.car_visual = self.car_visual_spin.value()
         self.project.car_draw_order = self.car_draw_order_spin.value()
         self.project.capacity_text = self.capacity_text_edit.text()
