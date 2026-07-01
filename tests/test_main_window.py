@@ -347,3 +347,30 @@ def test_anchor_crosshair_survives_direction_change(qtbot, tmp_path):
     pos = window.anchor_editor_panel.crosshair.pos()
     expected_origin = anchor_to_origin(project.anchors[1])
     assert (round(pos.x()), round(pos.y())) == expected_origin
+
+
+def test_direction_arrows_rotate_and_wrap(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    n = window.direction_combo.count()
+    assert window.direction_combo.currentIndex() == 0
+
+    window.direction_next_btn.click()
+    assert window.direction_combo.currentIndex() == 1
+
+    for _ in range(n - 1):
+        window.direction_next_btn.click()
+    assert window.direction_combo.currentIndex() == 0  # wrapped past the last direction
+
+    window.direction_prev_btn.click()
+    assert window.direction_combo.currentIndex() == n - 1  # wrapped backwards past 0
+
+
+def test_direction_label_reflects_current_direction(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+    assert window.direction_label.text() == "Direction 0"
+    assert window.direction_combo.isHidden()  # dropdown replaced by the arrow bar
+
+    window.direction_next_btn.click()
+    assert window.direction_label.text() == "Direction 1"

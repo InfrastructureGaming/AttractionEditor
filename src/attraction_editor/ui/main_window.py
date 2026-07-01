@@ -24,14 +24,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QScrollArea,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -77,8 +80,28 @@ class MainWindow(QMainWindow):
         # Shared preview surface + the one "Direction" selector every
         # preview-rendering section reads from, instead of each owning its own.
         self.preview_widget = PreviewWidget()
+        # Kept as the hidden source of truth for the current direction (every
+        # panel reads direction_combo.currentIndex() / its currentIndexChanged);
+        # the visible control is now a pair of rotate arrows + a label that drive
+        # it, for a more fluid "turn the ride" feel than a dropdown.
         self.direction_combo = QComboBox()
         self.direction_combo.addItems([f"Direction {d}" for d in range(DIRECTIONS)])
+        self.direction_combo.hide()
+
+        self.direction_prev_btn = QToolButton()
+        self.direction_prev_btn.setArrowType(Qt.ArrowType.LeftArrow)
+        self.direction_prev_btn.setToolTip("Rotate view left")
+        self.direction_next_btn = QToolButton()
+        self.direction_next_btn.setArrowType(Qt.ArrowType.RightArrow)
+        self.direction_next_btn.setToolTip("Rotate view right")
+        self.direction_label = QLabel()
+        self.direction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.direction_label.setMinimumWidth(96)  # steady width so arrows don't shuffle as the text changes
+
+        self.direction_prev_btn.clicked.connect(lambda: self._step_direction(-1))
+        self.direction_next_btn.clicked.connect(lambda: self._step_direction(1))
+        self.direction_combo.currentIndexChanged.connect(self._update_direction_label)
+        self._update_direction_label()
 
         for panel in (self.anchor_editor_panel, self.colour_preview_panel, self.animation_player_panel, self.layers_panel):
             panel.set_preview_widget(self.preview_widget)
@@ -103,7 +126,13 @@ class MainWindow(QMainWindow):
 
         preview_side = QWidget()
         preview_layout = QVBoxLayout()
-        preview_layout.addWidget(self.direction_combo)
+        direction_bar = QHBoxLayout()
+        direction_bar.addStretch()
+        direction_bar.addWidget(self.direction_prev_btn)
+        direction_bar.addWidget(self.direction_label)
+        direction_bar.addWidget(self.direction_next_btn)
+        direction_bar.addStretch()
+        preview_layout.addLayout(direction_bar)
         preview_layout.addWidget(self.preview_widget)
         preview_side.setLayout(preview_layout)
 
@@ -191,6 +220,15 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Save Project &As...", self._on_save_as)
         file_menu.addSeparator()
         file_menu.addAction("E&xit", self.close)
+
+    def _step_direction(self, delta: int) -> None:
+        """Rotate the view one step, wrapping around - the arrow buttons drive
+        the hidden direction_combo, whose currentIndexChanged fans out to every
+        preview section exactly as the dropdown used to."""
+        self.direction_combo.setCurrentIndex((self.direction_combo.currentIndex() + delta) % DIRECTIONS)
+
+    def _update_direction_label(self, *_args) -> None:
+        self.direction_label.setText(f"Direction {self.direction_combo.currentIndex()}")
 
     def _on_direction_changed(self, *_args) -> None:
         # "Last writer wins" on the shared preview - re-trigger every section
