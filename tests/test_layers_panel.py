@@ -26,6 +26,14 @@ def _browse_button_for(line_edit) -> QPushButton:
     return candidates[0]
 
 
+def test_layer_list_is_tall_enough_to_show_several_rows(qtbot):
+    panel = LayersPanel()
+    qtbot.addWidget(panel)
+    # Taller than the default ~2-row QListWidget so multi-layer projects are
+    # navigable (DPI-aware, so assert in row-heights not pixels).
+    assert panel.layer_list.minimumHeight() >= panel.layer_list.fontMetrics().height() * 6
+
+
 def test_browse_button_commits_sprite_dir_without_extra_interaction(qtbot, tmp_path, monkeypatch):
     panel = LayersPanel()
     qtbot.addWidget(panel)

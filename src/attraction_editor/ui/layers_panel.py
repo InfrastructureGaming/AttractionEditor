@@ -71,6 +71,10 @@ class LayersPanel(QWidget):
         self._loading = False
 
         self.layer_list = QListWidget()
+        # Default QListWidget sizeHint only shows ~2 rows, which is awkward to
+        # navigate on multi-layer projects. Give it room for ~7 rows, DPI-aware
+        # via font metrics rather than a hardcoded pixel height.
+        self.layer_list.setMinimumHeight(self.layer_list.fontMetrics().height() * 7 + 12)
         add_btn = QPushButton("Add layer")
         remove_btn = QPushButton("Remove layer")
         up_btn = QPushButton("Move up (back)")
