@@ -72,11 +72,27 @@ _SENTINEL_RGB = (0, 255, 0)  # pure green; absent from both remap zones and norm
 
 
 @lru_cache(maxsize=1)
+def special_indices() -> frozenset[int]:
+    """Indices OpenRCT2 marks Special (ImageImporter::GetPaletteIndexType): 0-9,
+    230-239 (water-wave/sparkle animation) and 255. The engine ANIMATES several
+    of these (UpdatePaletteEffects), so a static structure pixel that lands on
+    one visibly FLICKERS while the ride is at rest - motion masks it, which is
+    why it only shows when stopped. openrct2-cli's -m closest already refuses to
+    assign them (IsChangablePixel); our in-tool quantisation must exclude them
+    too, or dark structure pixels drift onto the near-black low indices / dark
+    water colours and shimmer."""
+    return frozenset(range(0, 10)) | frozenset(range(230, 240)) | frozenset({255})
+
+
+@lru_cache(maxsize=1)
 def all_non_primary_indices() -> frozenset[int]:
-    """Every palette index except the 12 primary-remap slots (243-254) -
-    the default candidate set for ordinary (zone-unaware) quantisation."""
+    """The default candidate set for ordinary (zone-unaware) quantisation: every
+    palette index openrct2-cli's IsChangablePixel would accept - all 256 minus
+    the 12 primary-remap slots (243-254) AND the Special/animated ranges (see
+    special_indices, which fixes the at-rest flicker). Name kept for callers; it
+    now matches IsChangablePixel exactly."""
     primary = range(PRIMARY_REMAP_START, PRIMARY_REMAP_START + REMAP_LENGTH)
-    return frozenset(range(256)) - frozenset(primary)
+    return frozenset(range(256)) - frozenset(primary) - special_indices()
 
 
 @lru_cache(maxsize=1)

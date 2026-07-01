@@ -8,12 +8,15 @@ from PIL import Image
 
 from attraction_editor.build.dither import (
     _linear_luma,
+    all_non_primary_indices,
     dither_frame,
     dither_frame_atkinson,
     dither_frame_bayer,
     dither_frame_by_algorithm,
     primary_zone_indices,
     secondary_zone_indices,
+    special_indices,
+    structure_indices,
     snap_to_palette,
 )
 from attraction_editor.palette.remap import (
@@ -241,6 +244,36 @@ def test_dither_frame_no_primary_remap_indices():
                 assert not (PRIMARY_REMAP_START <= idx < PRIMARY_REMAP_START + REMAP_LENGTH), (
                     f"pixel ({x},{y}) maps to primary-remap index {idx}"
                 )
+
+
+def test_special_indices_match_engine_and_are_excluded():
+    """Special = 0-9, 230-239 (water animation), 255 (ImageImporter). Candidate
+    sets must exclude them so no static pixel lands on an animated index and
+    flickers at rest."""
+    assert special_indices() == frozenset(range(0, 10)) | frozenset(range(230, 240)) | {255}
+    assert all_non_primary_indices().isdisjoint(special_indices())
+    assert structure_indices().isdisjoint(special_indices())
+
+
+def test_dither_frame_no_special_animated_indices():
+    """Regression for the 'resting flicker': no opaque output pixel should map to
+    a Special/animated palette index (0-9, 230-239, 255), which the engine cycles."""
+    img = _make_gradient_rgba(64, 64)
+    out = dither_frame(img)
+
+    palette = load_standard_palette()
+    pal_map = {tuple(rgb): i for i, rgb in enumerate(palette)}
+    special = special_indices()
+
+    out_px = out.load()
+    w, h = out.size
+    for x in range(w):
+        for y in range(h):
+            r, g, b, a = out_px[x, y]
+            if a > 0:
+                idx = pal_map.get((r, g, b))
+                assert idx is not None
+                assert idx not in special, f"pixel ({x},{y}) maps to Special/animated index {idx}"
 
 
 def test_dither_frame_opaque_input_stays_opaque():
