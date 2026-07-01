@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 DIRECTIONS = 4
@@ -360,6 +360,13 @@ class RideProject:
             # its own (see build/object_json.py's invalidation_bounds), so
             # total height is just their sum.
             data["sprite_height"] = data.pop("sprite_height_negative") + data.pop("sprite_height_positive")
+
+        # Ignore any leftover keys that aren't current fields - e.g. a project
+        # saved while an experimental field existed that was later reverted
+        # (shuffle_load_order). Without this, dropping a field breaks every
+        # project file that still carries it.
+        known = {f.name for f in fields(cls)}
+        data = {k: v for k, v in data.items() if k in known}
 
         return cls(
             anchors=anchors,
