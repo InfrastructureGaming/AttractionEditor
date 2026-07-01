@@ -241,6 +241,11 @@ class RideProject:
     # the in-game £/month figure tracks this but isn't identical.
     upkeep_cost: int = 50
     UPKEEP_COST_MAX = 500
+    # When True, guests board a random free seat instead of filling seats in order
+    # (engine: RideObjectEntry::shuffleLoadOrder / Guest.cpp's PeepChooseSeatFromCar).
+    # Stops a single-vehicle ride whose seat pairs are numbered sequentially (e.g. a
+    # wheel) from visibly loading the same way every dispatch. Paired seating is kept.
+    shuffle_load_order: bool = False
     # The breakdowns this ride may suffer, written into object.json's
     # "breakdowns" array (see build/object_json.py + BREAKDOWN_TYPES). The tool
     # always emits this, so it always replaces the ride type's default set: an

@@ -230,6 +230,14 @@ def test_write_object_json_emits_upkeep_cost(tmp_path):
     assert write_object_json(project)["properties"]["upkeepCost"] == 200
 
 
+def test_write_object_json_emits_shuffle_load_order(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    assert write_object_json(project)["properties"]["shuffleLoadOrder"] is False
+
+    project.shuffle_load_order = True
+    assert write_object_json(project)["properties"]["shuffleLoadOrder"] is True
+
+
 def test_colour_schemes_block_multiple_presets(tmp_path):
     """Matches rct2.ride.twist1.json's carColours shape: a list of presets,
     each preset a one-element list wrapping a [Body, Trim, Tertiary] triple."""

@@ -111,6 +111,22 @@ def test_bonus_value_round_trips_clamps_and_back_compat(tmp_path: Path):
     assert RideProject.load(legacy).bonus_value == 35
 
 
+def test_shuffle_load_order_round_trips_and_back_compat(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.shuffle_load_order is False  # default: orderly sequential fill
+
+    project.shuffle_load_order = True
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).shuffle_load_order is True
+
+    data = project.to_dict()
+    data.pop("shuffle_load_order")  # pre-feature project -> default False
+    legacy = tmp_path / "legacy.ridepkg.json"
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert RideProject.load(legacy).shuffle_load_order is False
+
+
 def test_upkeep_cost_round_trips_clamps_and_back_compat(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.upkeep_cost == 50  # default matches flat_ride_generic base

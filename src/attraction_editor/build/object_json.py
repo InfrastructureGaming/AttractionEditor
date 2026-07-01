@@ -216,6 +216,8 @@ def write_object_json(project: RideProject) -> dict:
     properties["bonusValue"] = project.bonus_value
     # Per-object running cost (RideObjectEntry::upkeepBaseCostOverride -> UpkeepCosts.BaseCost).
     properties["upkeepCost"] = project.upkeep_cost
+    # Guests board a random free seat instead of filling in order (RideObjectEntry::shuffleLoadOrder).
+    properties["shuffleLoadOrder"] = project.shuffle_load_order
 
     animation = flat_ride_animation_block(project)
     if animation is not None:
