@@ -121,11 +121,29 @@ def colour_schemes_block(project: RideProject) -> list:
     ]
 
 
+def num_gondola_cars(project: RideProject) -> int:
+    """How many engine cars (gondola vehicles) the ride is built from = one per
+    rider sprite set (RiderFrameStride), min 1. The ride ships as ONE train of
+    this many cars (write_object_json emits min/maxCarsPerTrain), so each car is
+    its own seat container with its own peep[] - lifting the old 32-seat ceiling
+    (a single vehicle's peep[32]) to num_gondola_cars x (<=32), and giving random
+    load order for free (the engine picks a random car per guest)."""
+    return max(1, len(project.cars))
+
+
+def seats_per_gondola(project: RideProject) -> int:
+    """The ride's total seats (car_num_seats) split evenly across the gondola
+    cars, clamped to the engine's per-vehicle 32-seat cap (Vehicle::peep[32])."""
+    return min(32, project.car_num_seats // num_gondola_cars(project))
+
+
 def cars_block(project: RideProject) -> dict:
-    """Build the single 'cars' entry (carsPerFlatRide is always 1 for this
-    tool's flat rides - RideProject.cars is a different concept, the
-    rider-overlay sprite sets layered on top, not this engine-level vehicle
-    descriptor). spriteWidth/spriteHeightNegative/Positive are derived from
+    """Build the single 'cars' car-TYPE entry. The ride is one train of
+    num_gondola_cars() copies of this type (carsPerFlatRide stays 1;
+    min/maxCarsPerTrain carry the count - see write_object_json), so numSeats
+    here is the per-gondola seat count (seats_per_gondola), not the ride total.
+    RideProject.cars is the matching set of rider-overlay sprite sets, one per
+    gondola. spriteWidth/spriteHeightNegative/Positive are derived from
     _sprite_extents rather than authored directly, same reasoning as
     invalidation_bounds. hasAdditionalColour1/2 are always true - every
     colour scheme this tool generates uses both the Trim (secondary,
@@ -143,7 +161,7 @@ def cars_block(project: RideProject) -> dict:
         "rotationFrameMask": project.rotation_frame_mask,
         "tabOffset": project.car_tab_offset,
         "tabScale": project.car_tab_scale,
-        "numSeats": project.car_num_seats,
+        "numSeats": seats_per_gondola(project),
         "spriteWidth": max(left, right),
         "spriteHeightNegative": above,
         "spriteHeightPositive": below,
@@ -205,6 +223,12 @@ def write_object_json(project: RideProject) -> dict:
     properties["category"] = project.category
     properties.pop("rotationMode", None)
     properties["carsPerFlatRide"] = 1
+    # Build the ride as ONE train of num_gondola_cars() cars (each gondola its own
+    # seat container). Random load order + >32 capacity then come free from the
+    # engine's existing multi-car boarding. min==max forces exactly that count.
+    gondola_cars = num_gondola_cars(project)
+    properties["minCarsPerTrain"] = gondola_cars
+    properties["maxCarsPerTrain"] = gondola_cars
     properties["carColours"] = colour_schemes_block(project)
     properties["cars"] = cars_block(project)
     # Always emitted, so it always replaces the generic flat-ride type's default

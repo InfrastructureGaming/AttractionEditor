@@ -290,6 +290,43 @@ def test_cars_block_derives_sprite_dims_and_hardcodes_colour_flags(tmp_path):
     assert block["spriteHeightPositive"] == below
 
 
+def test_multi_gondola_ride_emits_one_train_of_m_cars(tmp_path):
+    """A ride with N rider cars ships as ONE train of N gondola cars, each
+    holding total/N seats - lifting the 32-seat single-vehicle cap and giving
+    free random load order (the engine picks a random car per guest)."""
+    project = make_synthetic_project(tmp_path, num_cars=3)
+    project.car_num_seats = 6  # 3 gondolas x 2 seats
+
+    props = write_object_json(project)["properties"]
+
+    assert props["carsPerFlatRide"] == 1
+    assert props["minCarsPerTrain"] == 3
+    assert props["maxCarsPerTrain"] == 3
+    assert props["cars"]["numSeats"] == 2  # 6 // 3 gondolas
+
+
+def test_no_rider_cars_stays_one_car_with_all_seats(tmp_path):
+    """No rider sprite sets -> one gondola car holding every seat: the legacy
+    single-vehicle shape, for back-compat with rider-less rides."""
+    project = make_synthetic_project(tmp_path)  # num_cars=0
+    project.car_num_seats = 10
+
+    props = write_object_json(project)["properties"]
+
+    assert props["minCarsPerTrain"] == 1
+    assert props["maxCarsPerTrain"] == 1
+    assert props["cars"]["numSeats"] == 10
+
+
+def test_seats_per_gondola_clamped_to_per_vehicle_cap(tmp_path):
+    """A single car can't exceed the engine's peep[32]; per-car seats clamp to 32
+    (a >32 request must be split across more gondolas)."""
+    project = make_synthetic_project(tmp_path)  # 1 gondola
+    project.car_num_seats = 40
+
+    assert cars_block(project)["numSeats"] == 32
+
+
 def test_write_object_json_creates_file_from_scratch(tmp_path):
     """The whole point of this rewrite: no pre-existing object.json template
     is required any more - this used to be a hard FileNotFoundError."""
