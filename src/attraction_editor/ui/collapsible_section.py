@@ -11,11 +11,16 @@ Collapsing here is purely visual (show/hide); it never touches enabled state."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QToolButton, QVBoxLayout, QWidget
 
 
 class CollapsibleSection(QWidget):
+    # Emitted with the new expanded state whenever the section folds/unfolds, so
+    # callers can react to a section becoming (in)visible - e.g. AnchorEditorPanel
+    # only wants its crosshair on the shared preview while its section is open.
+    toggled = Signal(bool)
+
     def __init__(self, title: str, content: QWidget, parent: QWidget | None = None, *, expanded: bool = True) -> None:
         super().__init__(parent)
 
@@ -45,3 +50,4 @@ class CollapsibleSection(QWidget):
     def _on_toggled(self, expanded: bool) -> None:
         self.body.setVisible(expanded)
         self.toggle_button.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggled.emit(expanded)

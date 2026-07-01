@@ -5,7 +5,13 @@ pixel math and its panel-level wiring."""
 from __future__ import annotations
 
 from attraction_editor.model.project import DirectionAnchor
-from attraction_editor.ui.anchor_editor_panel import _FootprintGridItem, _footprint_grid_lines, anchor_to_origin, origin_to_anchor
+from attraction_editor.ui.anchor_editor_panel import (
+    _CrosshairItem,
+    _FootprintGridItem,
+    _footprint_grid_lines,
+    anchor_to_origin,
+    origin_to_anchor,
+)
 from attraction_editor.ui.main_window import MainWindow
 from tests.fixtures.synthetic import make_synthetic_project
 
@@ -81,10 +87,11 @@ def test_footprint_grid_hidden_by_default_shown_and_centered_when_enabled(qtbot,
 
     window._set_project(project, None)
 
-    # Off by default - the grid is an opt-in aid for checking plot clipping.
+    # Off by default - the grid is an opt-in aid, and the Anchors section starts collapsed.
     grids = [item for item in window.preview_widget.scene.items() if isinstance(item, _FootprintGridItem)]
     assert grids == []
 
+    window.anchor_editor_panel.set_section_expanded(True)
     window.anchor_editor_panel.show_grid_check.setChecked(True)
 
     grids = [item for item in window.preview_widget.scene.items() if isinstance(item, _FootprintGridItem)]
@@ -99,6 +106,7 @@ def test_unchecking_show_grid_removes_the_overlay(qtbot, tmp_path):
     qtbot.addWidget(window)
     project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
+    window.anchor_editor_panel.set_section_expanded(True)
     window.anchor_editor_panel.show_grid_check.setChecked(True)  # off by default; turn on first
 
     window.anchor_editor_panel.show_grid_check.setChecked(False)
@@ -116,8 +124,52 @@ def test_preview_scene_rect_expands_to_include_the_footprint_grid(qtbot, tmp_pat
     project = make_synthetic_project(tmp_path)
 
     window._set_project(project, None)
+    window.anchor_editor_panel.set_section_expanded(True)
     window.anchor_editor_panel.show_grid_check.setChecked(True)  # grid is off by default
 
     scene_rect = window.preview_widget.scene.sceneRect()
     assert scene_rect.width() > 80
     assert scene_rect.height() > 60
+
+
+def test_anchor_crosshair_visibility_follows_section_state(qtbot, tmp_path):
+    """The red anchor crosshair only belongs on the shared preview while the
+    Anchors section is open (it starts collapsed)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    project = make_synthetic_project(tmp_path)
+    window._set_project(project, None)
+
+    def crosshairs():
+        return [item for item in window.preview_widget.scene.items() if isinstance(item, _CrosshairItem)]
+
+    # Collapsed by default -> no crosshair.
+    assert crosshairs() == []
+    assert window.anchor_editor_panel.crosshair is None
+
+    window.anchor_editor_panel.set_section_expanded(True)
+    assert len(crosshairs()) == 1
+
+    window.anchor_editor_panel.set_section_expanded(False)
+    assert crosshairs() == []
+    assert window.anchor_editor_panel.crosshair is None
+
+
+def test_footprint_grid_follows_anchor_when_origin_changed(qtbot, tmp_path):
+    """Adjusting Origin X/Y re-centres the footprint grid on the new anchor,
+    keeping it locked to the crosshair (not stranded at the old position)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    project = make_synthetic_project(tmp_path)
+    window._set_project(project, None)
+    panel = window.anchor_editor_panel
+    panel.set_section_expanded(True)
+    panel.show_grid_check.setChecked(True)
+
+    panel.x_spin.setValue(-40)
+    panel.y_spin.setValue(-30)
+
+    grids = [item for item in window.preview_widget.scene.items() if isinstance(item, _FootprintGridItem)]
+    assert len(grids) == 1
+    assert (round(grids[0].pos().x()), round(grids[0].pos().y())) == (-40, -30)
+    assert grids[0].pos() == panel.crosshair.pos()  # grid stays centred on the anchor

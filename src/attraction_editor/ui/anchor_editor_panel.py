@@ -135,6 +135,13 @@ class AnchorEditorPanel(QWidget):
         self.dither_check: QCheckBox | None = None
         self._active_scheme_getter: Callable[[], ColourScheme | None] | None = None
         self._updating = False
+        # The crosshair + footprint grid are aids for editing anchors, so they
+        # only belong on the shared preview while the Anchors section is open
+        # (set via set_section_expanded, wired to the section's toggle). The
+        # section starts collapsed, so they start hidden.
+        self._section_expanded = False
+        self.crosshair: _CrosshairItem | None = None
+        self._grid: _FootprintGridItem | None = None
 
         self.x_spin = QSpinBox()
         self.x_spin.setRange(-2000, 2000)
@@ -210,24 +217,51 @@ class AnchorEditorPanel(QWidget):
         else:
             self.preview_widget.clear()
 
+        # set_image/clear wiped the scene, so any previous overlays are gone.
+        self.crosshair = None
+        self._grid = None
+
         anchor = self.project.anchors[direction]
         x, y = anchor_to_origin(anchor)
 
-        if self.show_grid_check.isChecked():
-            grid = _FootprintGridItem(self.project.base_footprint_width, self.project.base_footprint_length)
-            grid.setPos(QPointF(x, y))
-            self.preview_widget.add_overlay_item(grid)
+        if self._section_expanded:
+            if self.show_grid_check.isChecked():
+                self._grid = _FootprintGridItem(self.project.base_footprint_width, self.project.base_footprint_length)
+                self._grid.setPos(QPointF(x, y))
+                self.preview_widget.add_overlay_item(self._grid)
 
-        self.crosshair = _CrosshairItem(self._on_crosshair_moved)
-        self.preview_widget.add_overlay_item(self.crosshair)
+            self.crosshair = _CrosshairItem(self._on_crosshair_moved)
+            self.preview_widget.add_overlay_item(self.crosshair)
 
         self._set_position(x, y)
         self.preview_widget.refit_view()
 
+    def set_section_expanded(self, expanded: bool) -> None:
+        """Called when the Anchors section folds/unfolds (wired to
+        CollapsibleSection.toggled by MainWindow). The crosshair + grid only
+        belong on the shared preview while the section is open."""
+        self._section_expanded = expanded
+        if self.preview_widget is None or self.project is None:
+            return
+        if expanded:
+            self.reload()
+        else:
+            # Pull our overlays off the shared preview without re-compositing -
+            # the crosshair/grid are the only overlays anyone adds.
+            self.preview_widget.clear_overlays()
+            self.crosshair = None
+            self._grid = None
+
     def _set_position(self, x: float, y: float) -> None:
         self._updating = True
         try:
-            self.crosshair.setPos(QPointF(x, y))
+            pos = QPointF(x, y)
+            if self.crosshair is not None:
+                self.crosshair.setPos(pos)
+            # The footprint grid is centred on the anchor, so it tracks the
+            # crosshair - keep them together when Origin X/Y change.
+            if self._grid is not None:
+                self._grid.setPos(pos)
             self.x_spin.setValue(round(x))
             self.y_spin.setValue(round(y))
         finally:
@@ -238,6 +272,8 @@ class AnchorEditorPanel(QWidget):
             return
         self._updating = True
         try:
+            if self._grid is not None:
+                self._grid.setPos(pos)  # keep the grid centred on the dragged anchor
             self.x_spin.setValue(round(pos.x()))
             self.y_spin.setValue(round(pos.y()))
         finally:

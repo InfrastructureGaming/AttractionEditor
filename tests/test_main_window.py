@@ -174,6 +174,7 @@ def test_main_window_loads_project(qtbot, tmp_path):
     assert window.animation_player_panel.car_checks.keys() == {car.name for car in project.cars}
 
     expected_origin = anchor_to_origin(project.anchors[0])
+    window.anchor_editor_panel.set_section_expanded(True)  # crosshair only present while Anchors is open
     pos = window.anchor_editor_panel.crosshair.pos()
     assert (round(pos.x()), round(pos.y())) == expected_origin
 
@@ -338,6 +339,7 @@ def test_anchor_crosshair_survives_direction_change(qtbot, tmp_path):
 
     project = make_synthetic_project(tmp_path)
     window._set_project(project, None)
+    window.anchor_editor_panel.set_section_expanded(True)  # crosshair only present while Anchors is open
 
     window.direction_combo.setCurrentIndex(1)
 

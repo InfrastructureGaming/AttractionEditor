@@ -112,7 +112,11 @@ class MainWindow(QMainWindow):
         controls_column.addWidget(_wrap_in_group("Ride Object", self.ride_object_panel))
         controls_column.addWidget(_wrap_in_group("Layers", self.layers_panel))
         controls_column.addWidget(_wrap_in_group("Sprites", self.sprite_browser_panel))
-        controls_column.addWidget(_wrap_in_group("Anchors", self.anchor_editor_panel))
+        anchors_section = _wrap_in_group("Anchors", self.anchor_editor_panel)
+        # The anchor crosshair/grid overlays only belong on the shared preview
+        # while the Anchors section is open (it starts collapsed).
+        anchors_section.toggled.connect(self.anchor_editor_panel.set_section_expanded)
+        controls_column.addWidget(anchors_section)
         controls_column.addWidget(_wrap_in_group("Colours", self.colour_preview_panel))
         controls_column.addWidget(_wrap_in_group("Animation", self.animation_player_panel))
         controls_column.addWidget(_wrap_in_group("Programs & Phases", self.program_editor_panel))
