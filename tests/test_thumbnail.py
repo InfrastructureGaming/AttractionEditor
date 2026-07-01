@@ -49,3 +49,32 @@ def test_render_thumbnail_writes_a_112_file(tmp_path):
     assert out_path.exists()
     with Image.open(out_path) as im:
         assert im.size == (THUMBNAIL_SIZE, THUMBNAIL_SIZE)
+
+
+def test_fit_output_is_on_palette_and_avoids_remap_zones():
+    """Off-palette source colours (arbitrary author images) and the LANCZOS/alpha
+    blends the fit introduces are snapped to real, NON-remap StandardPalette
+    colours - so the thumbnail renders identically in-engine (it looked fine in
+    the tool but wrong at runtime before) and can never be accidentally
+    recoloured by a pixel that drifted into a remap zone."""
+    import numpy as np
+
+    from attraction_editor.build.dither import structure_indices
+    from attraction_editor.palette.remap import load_standard_palette
+
+    palette = load_standard_palette()
+    allowed_codes = {(r << 16) | (g << 8) | b for i in structure_indices() for r, g, b in [palette[i]]}
+
+    # A gradient full of off-palette colours; the downscale blends yet more.
+    xs = np.arange(224)
+    arr = np.zeros((224, 224, 4), dtype=np.uint8)
+    arr[..., 0] = (xs[None, :] * 7) % 256
+    arr[..., 1] = (xs[:, None] * 5) % 256
+    arr[..., 2] = (xs[None, :] + xs[:, None]) % 256
+    arr[..., 3] = 255
+
+    out = np.asarray(fit_to_thumbnail(Image.fromarray(arr, "RGBA")))
+    opaque = out[out[..., 3] > 0][:, :3].astype(int)
+    codes = set(((opaque[:, 0] << 16) | (opaque[:, 1] << 8) | opaque[:, 2]).tolist())
+
+    assert codes <= allowed_codes  # every visible pixel is a non-remap palette colour

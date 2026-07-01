@@ -639,10 +639,13 @@ def _palette_rgb_codes() -> frozenset[int]:
     return frozenset((int(r) << 16) | (int(g) << 8) | int(b) for r, g, b in load_standard_palette())
 
 
-def snap_to_palette(img: Image.Image) -> Image.Image:
+def snap_to_palette(img: Image.Image, allowed_indices: frozenset[int] | None = None) -> Image.Image:
     """Return an RGBA copy of `img` with only its OFF-palette pixels snapped to
-    the nearest non-primary StandardPalette colour; pixels that are already an
-    exact StandardPalette entry are left untouched.
+    the nearest StandardPalette colour in `allowed_indices` (default
+    all_non_primary_indices()); pixels that are already an exact StandardPalette
+    entry are left untouched. Callers that must not introduce any recolourable
+    pixels (e.g. a static thumbnail) pass structure_indices() to exclude every
+    remap zone from the snap targets.
 
     Needed after alpha-compositing multiple already-dithered (exact-palette)
     layers together (build/compositing.py's composite_layer_stack):
@@ -676,7 +679,11 @@ def snap_to_palette(img: Image.Image) -> Image.Image:
     if not off_palette.any():
         return rgba  # everything already exact - nothing to clean up
 
-    snapped = np.asarray(_quantise_to_real_rgb(rgba.convert("RGB"), dither=Image.Dither.NONE).convert("RGB"))
+    snapped = np.asarray(
+        _quantise_to_real_rgb(rgba.convert("RGB"), dither=Image.Dither.NONE, allowed_indices=allowed_indices).convert(
+            "RGB"
+        )
+    )
     result_arr = rgb_arr.copy()
     off_2d = off_palette.reshape(h, w)
     result_arr[off_2d] = snapped[off_2d]

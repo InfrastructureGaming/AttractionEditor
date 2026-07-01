@@ -11,10 +11,16 @@ this module's only job is to make sure the pixels are 112x112 with the ride
 centered - the masked draw aligns the sprite to the mask's top-left and ignores
 the sprite's own offset, so centering has to be baked into the raster itself.
 
-Palette quantization is deliberately NOT done here: the build runs
-`openrct2-cli sprite build ... -m closest`, which quantizes every sprite
-(thumbnail included) to the OpenRCT2 palette, exactly as it does for the car
-overlays. Pre-quantizing would only risk diverging from that.
+Pixels are snapped to the StandardPalette here (fit_to_thumbnail), not left for
+openrct2-cli's `-m closest` pass. Two reasons the CLI can't be trusted with the
+thumbnail: (1) LANCZOS downscaling and the alpha-composited transparent padding
+blend colours into OFF-palette RGB at every edge, and letting the CLI re-quantise
+those uncontrollably was rendering wrong in-engine (looked fine in the tool,
+which shows true RGB); (2) a blended edge pixel can land inside a remap zone
+(202-213/46-57), which the engine would then recolour at runtime. Snapping to
+structure_indices() (every palette entry EXCEPT the remap zones) fixes both: the
+thumbnail is exact-palette, stable, and never accidentally recolourable - and
+the tool preview, which fits the same way, now matches what ships.
 """
 
 from __future__ import annotations
@@ -22,6 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PIL import Image
+
+from attraction_editor.build.dither import snap_to_palette, structure_indices
 
 # Matches the New Ride preview's visible area: kScrollItemSize (116) drawn at a
 # +2px inset on each side -> 112x112 (NewRide.cpp / SPR_NEW_RIDE_MASK).
@@ -49,7 +57,9 @@ def fit_to_thumbnail(image: Image.Image, size: int = THUMBNAIL_SIZE) -> Image.Im
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     offset = ((size - src.width) // 2, (size - src.height) // 2)
     canvas.alpha_composite(src, offset)
-    return canvas
+    # Snap the LANCZOS/alpha-blended off-palette pixels to real, non-remap
+    # colours so the thumbnail renders exactly the same in-engine as here.
+    return snap_to_palette(canvas, allowed_indices=structure_indices())
 
 
 def render_thumbnail(source_path: Path, out_path: Path, size: int = THUMBNAIL_SIZE) -> Path:
