@@ -80,6 +80,41 @@ def test_footprint_grid_item_bounding_rect_matches_diamond_extent():
     assert rect.height() == 192 + 2 * 2
 
 
+def _normalized_segments(lines):
+    """Undirected, integer-rounded segments, so set comparisons ignore endpoint
+    order and segment direction."""
+    return {
+        frozenset(((round(s.x()), round(s.y())), (round(e.x()), round(e.y())))) for s, e, _is_outer in lines
+    }
+
+
+def test_footprint_grid_reorients_for_non_square_footprint():
+    # A non-square plot's diamond visibly changes orientation between views.
+    assert _normalized_segments(_footprint_grid_lines(4, 6, 0)) != _normalized_segments(_footprint_grid_lines(4, 6, 1))
+
+
+def test_footprint_grid_square_footprint_is_rotation_invariant():
+    # A square plot looks identical from all four views, so its grid must too.
+    base = _normalized_segments(_footprint_grid_lines(5, 5, 0))
+    for direction in (1, 2, 3):
+        assert _normalized_segments(_footprint_grid_lines(5, 5, direction)) == base
+
+
+def test_footprint_grid_stays_centred_on_origin_in_every_direction():
+    # Whatever the rotation, the diamond stays centred on (0, 0) so it remains
+    # married to the anchor the item is positioned at.
+    for direction in range(4):
+        lines = _footprint_grid_lines(4, 6, direction)
+        xs = [p.x() for line in lines for p in line[:2]]
+        ys = [p.y() for line in lines for p in line[:2]]
+        assert min(xs) + max(xs) == 0
+        assert min(ys) + max(ys) == 0
+
+
+def test_footprint_grid_item_uses_the_given_direction():
+    assert _FootprintGridItem(4, 6, 2)._lines == _footprint_grid_lines(4, 6, 2)
+
+
 def test_footprint_grid_hidden_by_default_shown_and_centered_when_enabled(qtbot, tmp_path):
     window = MainWindow()
     qtbot.addWidget(window)

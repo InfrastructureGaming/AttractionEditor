@@ -62,27 +62,48 @@ class _CrosshairItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
 
-def _footprint_grid_lines(width: int, length: int) -> list[tuple[QPointF, QPointF, bool]]:
-    """Every tile-boundary line segment for a `width` x `length` isometric
-    tile grid, in local coordinates centered on the grid's own geometric
-    middle (so the item can be positioned at the same pixel as the anchor's
-    origin point - see anchor_to_origin - matching PaintGenericRotatingStructure's
-    own centered-on-the-plot convention, GenericFlatRide.cpp).
+# Screen delta (px) of a +1-tile step along the width axis (row_step) and the
+# length axis (col_step), for each of the 4 view rotations. Derived directly
+# from the engine's viewport projection (Viewport.cpp's Translate3DTo2DWithZ):
+#   rot 0: screenX = y-x, screenY = (x+y)/2      rot 1: -x-y, (y-x)/2
+#   rot 2: x-y, -(x+y)/2                          rot 3: x+y, (x-y)/2
+# with one tile = 32 world units (world/MapLimits.h kCoordsXYStep). Rotating the
+# view reorients the diamond exactly as the engine reprojects the plot, so the
+# grid stays married to that direction's rendered sprite. rot 0 reproduces the
+# original single-orientation math.
+_TILE_STEPS: dict[int, tuple[QPointF, QPointF]] = {
+    0: (QPointF(-32, 16), QPointF(32, 16)),
+    1: (QPointF(-32, -16), QPointF(-32, 16)),
+    2: (QPointF(32, -16), QPointF(-32, -16)),
+    3: (QPointF(32, 16), QPointF(32, -16)),
+}
 
-    Pixel math verified against the engine's own projection (world/MapLimits.h's
-    kCoordsXYStep=32, Viewport.cpp's Translate3DTo2DWithZ: screenX = y-x,
-    screenY = (x+y)/2, 1:1 with screen pixels, no extra scale factor): moving
-    one tile along the `width` axis is screen delta (-32, 16); along `length`
-    is (32, 16). vertex(row, col) = top + row*rowStep + col*colStep, where
-    `top` is the grid's row=0/col=0 corner relative to its own center.
+
+def _footprint_grid_lines(width: int, length: int, direction: int = 0) -> list[tuple[QPointF, QPointF, bool]]:
+    """Every tile-boundary line segment for a `width` x `length` isometric
+    tile grid as seen from view `direction` (0-3), in local coordinates centered
+    on the grid's own geometric middle (so the item can be positioned at the same
+    pixel as the anchor's origin point - see anchor_to_origin - matching
+    PaintGenericRotatingStructure's centered-on-the-plot convention,
+    GenericFlatRide.cpp).
+
+    `direction` picks the per-rotation tile-step vectors (_TILE_STEPS); the grid
+    reorients with the view so it lines up with the sprite rendered for that
+    direction. `top` (the row=0/col=0 corner relative to the grid's own centre)
+    is derived so the centroid stays at (0, 0) for every rotation - keeping the
+    diamond centred on the anchor no matter which way it's turned. A square
+    footprint's diamond is rotation-invariant, so only non-square footprints
+    change shape between directions.
 
     Returns (start, end, is_outer_edge) - is_outer_edge marks the 4 segments
     forming the outer boundary (row/col at 0 or its max), drawn brighter than
     the interior per-tile gridlines.
     """
-    row_step = QPointF(-32, 16)
-    col_step = QPointF(32, 16)
-    top = QPointF((width - length) * 16, -(width + length) * 8)
+    row_step, col_step = _TILE_STEPS[direction & 3]
+    top = QPointF(
+        -(width * row_step.x() + length * col_step.x()) / 2,
+        -(width * row_step.y() + length * col_step.y()) / 2,
+    )
 
     def vertex(row: int, col: int) -> QPointF:
         return QPointF(top.x() + row * row_step.x() + col * col_step.x(), top.y() + row * row_step.y() + col * col_step.y())
@@ -103,9 +124,9 @@ class _FootprintGridItem(QGraphicsItem):
     custom_ride_manifest docstring); this exists purely so an artist can see
     whether their structure's render extends past the reserved plot."""
 
-    def __init__(self, width: int, length: int) -> None:
+    def __init__(self, width: int, length: int, direction: int = 0) -> None:
         super().__init__()
-        self._lines = _footprint_grid_lines(width, length)
+        self._lines = _footprint_grid_lines(width, length, direction)
         self.setZValue(5)  # above the pixmap, below the crosshair (zValue 10)
 
         xs = [p.x() for line in self._lines for p in line[:2]]
@@ -226,7 +247,9 @@ class AnchorEditorPanel(QWidget):
 
         if self._section_expanded:
             if self.show_grid_check.isChecked():
-                self._grid = _FootprintGridItem(self.project.base_footprint_width, self.project.base_footprint_length)
+                self._grid = _FootprintGridItem(
+                    self.project.base_footprint_width, self.project.base_footprint_length, direction
+                )
                 self._grid.setPos(QPointF(x, y))
                 self.preview_widget.add_overlay_item(self._grid)
 
