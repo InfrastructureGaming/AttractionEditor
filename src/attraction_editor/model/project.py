@@ -178,12 +178,19 @@ class RideProject:
     # combined frame count across every phase of every program.
     programs: list[AnimationProgram] = field(default_factory=list)
     # Parametric animation spec: an ordered list of motion-segment dicts
-    # ({"kind": "swing"|"loop", ...} - see build/motion.py). When non-empty, the
-    # build COMPILES it into an explicit per-tick time-to-sprite map over the
-    # angle atlas (frames_per_dir frames, one pose per step) and emits it as the
-    # single animation program, instead of the range-based `programs` above.
-    # Stored as plain dicts so it round-trips through JSON with no custom codec.
+    # ({"kind": "swing"|"loop"|"frames", ...} - see build/motion.py). When
+    # non-empty, the build COMPILES it (compile_motion_program) into a MULTI-PHASE
+    # animation program - splitting at any repeatable Loop so the operator's
+    # "number of rotations" setting drives its count - and emits that instead of
+    # the range-based `programs` above. Stored as plain dicts so it round-trips
+    # through JSON with no custom codec.
     motion: list[dict] = field(default_factory=list)
+    # Rotation atlas resolution (degrees -> frame) for the ANGULAR swing/loop
+    # segments, distinct from frames_per_dir (the whole sheet). e.g. the
+    # Loop-O-Plane's rotation is 0-360 (rotation_frames=360) inside a 392-frame
+    # sheet whose 361-391 are the door sub-animation. 0 = fall back to
+    # frames_per_dir (pure-spin rides where the whole sheet IS the rotation).
+    rotation_frames: int = 0
     # At least one preset (see ColourScheme); the first is what preview panels
     # show by default. Written into object.json's properties.carColours on
     # build - never baked into the shipped sprite pixels.

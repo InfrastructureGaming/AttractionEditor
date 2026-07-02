@@ -63,6 +63,29 @@ def test_motion_spec_takes_precedence_over_range_programs(tmp_path):
     assert "spriteMap" in phase  # motion wins over the range-based program
 
 
+def test_flat_ride_animation_block_emits_multi_phase_program_with_operator_loop(tmp_path):
+    """The Loop-O-Plane shape: doors + build-up (intro), a repeatable loop the
+    operator's rotations setting drives, then doors open (final), each a spriteMap
+    phase. rotation_frames (360) maps the angles; frames_per_dir (392) is the sheet."""
+    project = make_synthetic_project(tmp_path)
+    project.frames_per_dir = 392
+    project.rotation_frames = 360
+    project.motion = [
+        {"kind": "frames", "start": 391, "end": 389},  # doors close
+        {"kind": "swing", "amplitude": 90, "cycles": 1, "ticks": 8},
+        {"kind": "loop", "turns": 1, "ticks": 8, "repeatable": True},
+        {"kind": "frames", "start": 389, "end": 391},  # doors open
+    ]
+
+    phases = flat_ride_animation_block(project)["programs"][0]["phases"]
+
+    assert len(phases) == 3
+    assert phases[1]["repeatUntilRotationsComplete"] is True  # operator-driven loop
+    assert phases[1]["resetRotationsOnEntry"] is True
+    assert phases[2]["isFinalPhase"] is True
+    assert phases[2]["spriteMap"] == [389, 390, 391]  # doors open -> idles at 391
+
+
 def test_flat_ride_animation_block_structure(tmp_path):
     project = make_synthetic_project(tmp_path, num_cars=3)
     project.programs = [

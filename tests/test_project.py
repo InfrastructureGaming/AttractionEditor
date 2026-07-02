@@ -131,14 +131,19 @@ def test_load_ignores_unknown_keys(tmp_path: Path):
 def test_motion_spec_round_trips(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.motion == []  # default: no parametric motion
+    assert project.rotation_frames == 0  # default: fall back to frames_per_dir
 
     project.motion = [
+        {"kind": "frames", "start": 391, "end": 361, "ticks_per_frame": 1},
         {"kind": "swing", "amplitude": 30, "cycles": 1, "ticks": 90, "easing": "sine"},
-        {"kind": "loop", "turns": 2, "ticks": 720, "direction": 1},
+        {"kind": "loop", "turns": 2, "ticks": 720, "direction": 1, "repeatable": True},
     ]
+    project.rotation_frames = 360
     path = tmp_path / "project.ridepkg.json"
     project.save(path)
-    assert RideProject.load(path).motion == project.motion
+    loaded = RideProject.load(path)
+    assert loaded.motion == project.motion
+    assert loaded.rotation_frames == 360
 
 
 def test_loading_positions_round_trip_and_int8_clamp(tmp_path: Path):

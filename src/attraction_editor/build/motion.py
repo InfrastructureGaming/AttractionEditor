@@ -64,15 +64,35 @@ class Loop:
     easing "linear" (default) is a constant-speed rotation; "sine" eases the
     revolution in and out (accelerate then decelerate), useful for a single
     showcase loop rather than continuous spinning.
+
+    `repeatable` marks this loop as the operator-controlled unit: compile_motion_program
+    splits it into its own phase with resetRotationsOnEntry + repeatUntilRotationsComplete,
+    so the ride's "number of rotations" operating setting drives how many times it plays.
     """
 
     turns: int
     ticks: int
     direction: int = 1
     easing: str = "linear"
+    repeatable: bool = False
 
 
-MotionSegment = Swing | Loop
+@dataclass
+class Frames:
+    """Raw frame-range playback, NOT angle-based: plays `start`..`end` inclusive,
+    each frame held `ticks_per_frame` ticks. Direction is inferred - start <= end
+    plays forward, start > end plays in reverse (so one door-open range, reversed,
+    doubles as door-close). For doors, restraints, or any sub-animation whose frames
+    aren't a function of rotation angle; indices are raw atlas positions, never
+    remapped by the rotation resolution.
+    """
+
+    start: int
+    end: int
+    ticks_per_frame: int = 1
+
+
+MotionSegment = Swing | Loop | Frames
 
 
 def angle_to_frame(angle_deg: float, atlas_frames: int = ATLAS_FRAMES) -> int:
@@ -113,20 +133,37 @@ def _loop_angles(seg: Loop) -> list[float]:
     return [total * _ease(t / seg.ticks, seg.easing) for t in range(seg.ticks)]
 
 
-def compile_motion(segments: list[MotionSegment], atlas_frames: int = ATLAS_FRAMES) -> list[int]:
+def _frames_sequence(seg: Frames) -> list[int]:
+    step = 1 if seg.start <= seg.end else -1
+    ticks = max(1, seg.ticks_per_frame)
+    out: list[int] = []
+    for f in range(seg.start, seg.end + step, step):
+        out.extend([f] * ticks)
+    return out
+
+
+def compile_motion(segments: list[MotionSegment], rotation_frames: int = ATLAS_FRAMES) -> list[int]:
     """Compile an ordered list of motion segments into the explicit per-tick
     atlas-frame sequence (the phase's time-to-sprite map). Segments are
-    concatenated in order - each begins from rest-angle 0, so chaining a
-    swing into a loop is continuous through the rest point."""
+    concatenated in order - each angular segment begins from rest-angle 0, so
+    chaining a swing into a loop is continuous through the rest point.
+
+    `rotation_frames` is the ROTATION atlas resolution (degrees -> frame) for the
+    angular Swing/Loop segments; it is NOT the total sprite-sheet size. Frames
+    segments emit raw indices and ignore it (e.g. a 360-frame rotation living in a
+    392-frame sheet whose 361-391 are doors)."""
     frames: list[int] = []
     for seg in segments:
+        if isinstance(seg, Frames):
+            frames.extend(_frames_sequence(seg))
+            continue
         if isinstance(seg, Swing):
             angles = _swing_angles(seg)
         elif isinstance(seg, Loop):
             angles = _loop_angles(seg)
         else:  # pragma: no cover - guards against a bad spec
             raise TypeError(f"unknown motion segment {type(seg).__name__}")
-        frames.extend(angle_to_frame(a, atlas_frames) for a in angles)
+        frames.extend(angle_to_frame(a, rotation_frames) for a in angles)
     return frames
 
 
@@ -148,10 +185,60 @@ def segment_from_dict(d: dict) -> MotionSegment:
             ticks=int(d["ticks"]),
             direction=int(d.get("direction", 1)),
             easing=str(d.get("easing", "linear")),
+            repeatable=bool(d.get("repeatable", False)),
+        )
+    if kind == "frames":
+        return Frames(
+            start=int(d["start"]),
+            end=int(d["end"]),
+            ticks_per_frame=int(d.get("ticks_per_frame", 1)),
         )
     raise ValueError(f"unknown motion segment kind {kind!r}")
 
 
-def compile_motion_spec(spec: list[dict], atlas_frames: int = ATLAS_FRAMES) -> list[int]:
-    """compile_motion for a stored spec (list of dicts, e.g. RideProject.motion)."""
-    return compile_motion([segment_from_dict(d) for d in spec], atlas_frames)
+def compile_motion_spec(spec: list[dict], rotation_frames: int = ATLAS_FRAMES) -> list[int]:
+    """compile_motion for a stored spec (list of dicts), as a single flat map.
+    Used for pure-spin rides and tests; multi-phase rides use compile_motion_program."""
+    return compile_motion([segment_from_dict(d) for d in spec], rotation_frames)
+
+
+def compile_motion_program(spec: list[dict], rotation_frames: int = ATLAS_FRAMES) -> list[dict]:
+    """Compile a linear motion spec into a MULTI-PHASE program (a list of phase
+    dicts in object.json shape). The spec is split at every repeatable segment: a
+    contiguous run of non-repeatable segments becomes one one-shot phase, and each
+    repeatable Loop becomes its own phase carrying resetRotationsOnEntry +
+    repeatUntilRotationsComplete - so the operator's "number of rotations" setting
+    drives that loop's count while the intro (doors + build-up) and outro (settle +
+    doors) around it play exactly once. The last phase is marked isFinalPhase; the
+    engine defaults each phase's nextPhase to the following one, so the flow is
+    sequential without emitting it. A spec with no repeatable segment yields a
+    single final phase (equivalent to one compiled map).
+
+    Each phase dict: {"spriteMap": [...], optionally "repeatUntilRotationsComplete",
+    "resetRotationsOnEntry", "isFinalPhase"} - see build/object_json.py."""
+    segments = [segment_from_dict(d) for d in spec]
+
+    # Group into runs so each repeatable Loop stands alone as its own phase.
+    groups: list[tuple[bool, list[MotionSegment]]] = []
+    run: list[MotionSegment] = []
+    for seg in segments:
+        if isinstance(seg, Loop) and seg.repeatable:
+            if run:
+                groups.append((False, run))
+                run = []
+            groups.append((True, [seg]))
+        else:
+            run.append(seg)
+    if run:
+        groups.append((False, run))
+
+    phases: list[dict] = []
+    for is_repeatable, segs in groups:
+        phase: dict = {"spriteMap": compile_motion(segs, rotation_frames)}
+        if is_repeatable:
+            phase["repeatUntilRotationsComplete"] = True
+            phase["resetRotationsOnEntry"] = True
+        phases.append(phase)
+    if phases:
+        phases[-1]["isFinalPhase"] = True
+    return phases

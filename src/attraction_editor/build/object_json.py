@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from attraction_editor.build.motion import compile_motion_spec
+from attraction_editor.build.motion import compile_motion_program
 from attraction_editor.model.project import RideProject
 from attraction_editor.sprites.manifest import manifest_image_count
 
@@ -71,12 +71,15 @@ def flat_ride_animation_block(project: RideProject) -> dict | None:
     half_width, height_above, height_below = invalidation_bounds(project)
 
     if project.motion:
-        # Parametric ride: compile the motion spec into one explicit per-tick
-        # time-to-sprite map over the angle atlas (frames_per_dir poses) and emit
-        # it as a single final phase. The engine reads "spriteMap" straight into
-        # phase.TimeToSpriteMap (see RideObject.cpp), so no range is needed.
-        sprite_map = compile_motion_spec(project.motion, project.frames_per_dir)
-        programs_json = [{"phases": [{"spriteMap": sprite_map, "isFinalPhase": True}]}]
+        # Parametric ride: compile the linear motion spec into a MULTI-PHASE
+        # program (compile_motion_program splits at repeatable loops so the
+        # operator's rotations setting drives the loop count). Each phase carries an
+        # explicit "spriteMap" the engine reads straight into phase.TimeToSpriteMap
+        # (see RideObject.cpp), plus its repeat/reset/final flags. The angular
+        # segments map over rotation_frames (the rotation resolution), which falls
+        # back to frames_per_dir for pure-spin rides where the sheet IS the rotation.
+        rotation_frames = project.rotation_frames or project.frames_per_dir
+        programs_json = [{"phases": compile_motion_program(project.motion, rotation_frames)}]
     else:
         programs_json = []
         for program in project.programs:

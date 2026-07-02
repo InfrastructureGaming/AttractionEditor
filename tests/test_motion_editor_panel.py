@@ -103,6 +103,47 @@ def test_set_project_loads_existing_motion(qtbot, tmp_path):
     assert panel.cycles_spin.value() == 2
 
 
+def test_add_frames_appends_door_default(qtbot, tmp_path):
+    panel, project = _panel(qtbot, tmp_path)
+    _btn(panel, "Add frames").click()
+    seg = project.motion[0]
+    assert seg["kind"] == "frames"
+    assert (seg["start"], seg["end"]) == (391, 361)  # door-close default
+
+
+def test_editing_frames_fields_writes_to_segment(qtbot, tmp_path):
+    panel, project = _panel(qtbot, tmp_path)
+    _btn(panel, "Add frames").click()
+
+    panel.frames_start_spin.setValue(361)
+    panel.frames_end_spin.setValue(391)
+    panel.frame_ticks_spin.setValue(2)
+
+    seg = project.motion[0]
+    assert (seg["start"], seg["end"], seg["ticks_per_frame"]) == (361, 391, 2)
+
+
+def test_loop_repeatable_checkbox_writes(qtbot, tmp_path):
+    panel, project = _panel(qtbot, tmp_path)
+    _btn(panel, "Add loop").click()
+
+    panel.repeatable_check.setChecked(True)
+
+    assert project.motion[0]["repeatable"] is True
+
+
+def test_frames_selection_hides_shared_ticks_and_easing(qtbot, tmp_path):
+    panel, _project = _panel(qtbot, tmp_path)
+    _btn(panel, "Add frames").click()
+    assert panel.frames_fields.isVisibleTo(panel)
+    assert not panel.shared_fields.isVisibleTo(panel)  # frames time per-frame
+    assert not panel.swing_fields.isVisibleTo(panel)
+
+    _btn(panel, "Add swing").click()  # selects the new swing
+    assert panel.shared_fields.isVisibleTo(panel)
+    assert not panel.frames_fields.isVisibleTo(panel)
+
+
 def test_panel_disabled_until_project_set(qtbot):
     panel = MotionEditorPanel()
     qtbot.addWidget(panel)
