@@ -128,6 +128,19 @@ def test_load_ignores_unknown_keys(tmp_path: Path):
     assert not hasattr(loaded, "shuffle_load_order")
 
 
+def test_motion_spec_round_trips(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.motion == []  # default: no parametric motion
+
+    project.motion = [
+        {"kind": "swing", "amplitude": 30, "cycles": 1, "ticks": 90, "easing": "sine"},
+        {"kind": "loop", "turns": 2, "ticks": 720, "direction": 1},
+    ]
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).motion == project.motion
+
+
 def test_loading_positions_round_trip_and_int8_clamp(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.loading_positions == []  # default: walk to centre

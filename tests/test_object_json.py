@@ -32,6 +32,37 @@ def test_flat_ride_animation_block_empty_programs(tmp_path):
     assert flat_ride_animation_block(project) is None
 
 
+def test_flat_ride_animation_block_compiles_motion_to_explicit_map(tmp_path):
+    """A parametric ride emits one final phase carrying an explicit spriteMap
+    (the compiled time-to-sprite sequence over the angle atlas), no frame range."""
+    project = make_synthetic_project(tmp_path)
+    project.frames_per_dir = 360
+    project.motion = [{"kind": "loop", "turns": 1, "ticks": 360}]
+
+    block = flat_ride_animation_block(project)
+
+    assert block is not None
+    assert block["framesPerDir"] == 360
+    phases = block["programs"][0]["phases"]
+    assert len(phases) == 1
+    assert phases[0]["isFinalPhase"] is True
+    assert phases[0]["spriteMap"] == list(range(360))
+    assert "startFrame" not in phases[0]  # explicit map replaces the range
+
+
+def test_motion_spec_takes_precedence_over_range_programs(tmp_path):
+    project = make_synthetic_project(tmp_path)
+    project.frames_per_dir = 360
+    project.programs = [
+        AnimationProgram(name="P", phases=[AnimationPhase(name="X", frame_start=0, frame_count=2, is_final_phase=True)])
+    ]
+    project.motion = [{"kind": "loop", "turns": 1, "ticks": 360}]
+
+    phase = flat_ride_animation_block(project)["programs"][0]["phases"][0]
+
+    assert "spriteMap" in phase  # motion wins over the range-based program
+
+
 def test_flat_ride_animation_block_structure(tmp_path):
     project = make_synthetic_project(tmp_path, num_cars=3)
     project.programs = [

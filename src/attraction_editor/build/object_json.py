@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from attraction_editor.build.motion import compile_motion_spec
 from attraction_editor.model.project import RideProject
 from attraction_editor.sprites.manifest import manifest_image_count
 
@@ -60,35 +61,44 @@ def invalidation_bounds(project: RideProject) -> tuple[int, int, int]:
 def flat_ride_animation_block(project: RideProject) -> dict | None:
     """Build the 'flatRideAnimation' dict from the project model.
 
-    Returns None if the project has no programs (legacy single-program rides
-    that don't use the flatRideAnimation JSON block).
+    Returns None if the project has neither range-based programs nor a
+    parametric motion spec (legacy single-program rides that don't use the
+    flatRideAnimation JSON block).
     """
-    if not project.programs:
+    if not project.programs and not project.motion:
         return None
 
     half_width, height_above, height_below = invalidation_bounds(project)
 
-    programs_json = []
-    for program in project.programs:
-        phases_json = []
-        for phase in program.phases:
-            phase_dict: dict = {
-                "startFrame": phase.frame_start,
-                "endFrame": phase.frame_start + phase.frame_count - 1,
-                "ticksPerFrame": phase.ticks_per_frame,
-            }
-            if not phase.is_final_phase:
-                phase_dict["nextPhase"] = phase.next_phase
-            if phase.repeat_until_rotations_complete:
-                phase_dict["repeatUntilRotationsComplete"] = True
-            if phase.is_final_phase:
-                phase_dict["isFinalPhase"] = True
-            if phase.reset_rotations_on_entry:
-                phase_dict["resetRotationsOnEntry"] = True
-            if phase.play_reverse:
-                phase_dict["playReverse"] = True
-            phases_json.append(phase_dict)
-        programs_json.append({"phases": phases_json})
+    if project.motion:
+        # Parametric ride: compile the motion spec into one explicit per-tick
+        # time-to-sprite map over the angle atlas (frames_per_dir poses) and emit
+        # it as a single final phase. The engine reads "spriteMap" straight into
+        # phase.TimeToSpriteMap (see RideObject.cpp), so no range is needed.
+        sprite_map = compile_motion_spec(project.motion, project.frames_per_dir)
+        programs_json = [{"phases": [{"spriteMap": sprite_map, "isFinalPhase": True}]}]
+    else:
+        programs_json = []
+        for program in project.programs:
+            phases_json = []
+            for phase in program.phases:
+                phase_dict: dict = {
+                    "startFrame": phase.frame_start,
+                    "endFrame": phase.frame_start + phase.frame_count - 1,
+                    "ticksPerFrame": phase.ticks_per_frame,
+                }
+                if not phase.is_final_phase:
+                    phase_dict["nextPhase"] = phase.next_phase
+                if phase.repeat_until_rotations_complete:
+                    phase_dict["repeatUntilRotationsComplete"] = True
+                if phase.is_final_phase:
+                    phase_dict["isFinalPhase"] = True
+                if phase.reset_rotations_on_entry:
+                    phase_dict["resetRotationsOnEntry"] = True
+                if phase.play_reverse:
+                    phase_dict["playReverse"] = True
+                phases_json.append(phase_dict)
+            programs_json.append({"phases": phases_json})
 
     return {
         "framesPerDir": project.frames_per_dir,

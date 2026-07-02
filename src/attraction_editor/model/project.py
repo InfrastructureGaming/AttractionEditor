@@ -177,6 +177,13 @@ class RideProject:
     # per-phase frame count as before. Non-empty = frames_per_dir is the TOTAL
     # combined frame count across every phase of every program.
     programs: list[AnimationProgram] = field(default_factory=list)
+    # Parametric animation spec: an ordered list of motion-segment dicts
+    # ({"kind": "swing"|"loop", ...} - see build/motion.py). When non-empty, the
+    # build COMPILES it into an explicit per-tick time-to-sprite map over the
+    # angle atlas (frames_per_dir frames, one pose per step) and emits it as the
+    # single animation program, instead of the range-based `programs` above.
+    # Stored as plain dicts so it round-trips through JSON with no custom codec.
+    motion: list[dict] = field(default_factory=list)
     # At least one preset (see ColourScheme); the first is what preview panels
     # show by default. Written into object.json's properties.carColours on
     # build - never baked into the shipped sprite pixels.

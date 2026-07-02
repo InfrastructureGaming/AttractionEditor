@@ -128,3 +128,30 @@ def compile_motion(segments: list[MotionSegment], atlas_frames: int = ATLAS_FRAM
             raise TypeError(f"unknown motion segment {type(seg).__name__}")
         frames.extend(angle_to_frame(a, atlas_frames) for a in angles)
     return frames
+
+
+def segment_from_dict(d: dict) -> MotionSegment:
+    """Rehydrate a Swing/Loop from its stored dict form (RideProject.motion holds
+    plain dicts so it round-trips through JSON with no custom serialisation; the
+    `kind` field is the discriminator)."""
+    kind = d.get("kind")
+    if kind == "swing":
+        return Swing(
+            amplitude=float(d["amplitude"]),
+            cycles=int(d.get("cycles", 1)),
+            ticks=int(d["ticks"]),
+            easing=str(d.get("easing", "sine")),
+        )
+    if kind == "loop":
+        return Loop(
+            turns=int(d.get("turns", 1)),
+            ticks=int(d["ticks"]),
+            direction=int(d.get("direction", 1)),
+            easing=str(d.get("easing", "linear")),
+        )
+    raise ValueError(f"unknown motion segment kind {kind!r}")
+
+
+def compile_motion_spec(spec: list[dict], atlas_frames: int = ATLAS_FRAMES) -> list[int]:
+    """compile_motion for a stored spec (list of dicts, e.g. RideProject.motion)."""
+    return compile_motion([segment_from_dict(d) for d in spec], atlas_frames)

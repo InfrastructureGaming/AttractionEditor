@@ -3,12 +3,16 @@ explicit per-tick atlas-frame time-to-sprite map)."""
 
 from __future__ import annotations
 
+import pytest
+
 from attraction_editor.build.motion import (
     ATLAS_FRAMES,
     Loop,
     Swing,
     angle_to_frame,
     compile_motion,
+    compile_motion_spec,
+    segment_from_dict,
 )
 
 
@@ -87,3 +91,27 @@ def test_empty_and_zero_tick_segments_are_harmless():
 
 def test_atlas_frames_default_is_360():
     assert ATLAS_FRAMES == 360
+
+
+def test_segment_from_dict_round_trips_both_kinds():
+    assert segment_from_dict({"kind": "swing", "amplitude": 30, "cycles": 2, "ticks": 90, "easing": "linear"}) == Swing(
+        amplitude=30, cycles=2, ticks=90, easing="linear"
+    )
+    assert segment_from_dict({"kind": "loop", "turns": 3, "ticks": 90, "direction": -1}) == Loop(
+        turns=3, ticks=90, direction=-1
+    )
+
+
+def test_segment_from_dict_unknown_kind_raises():
+    with pytest.raises(ValueError):
+        segment_from_dict({"kind": "wobble", "ticks": 10})
+
+
+def test_compile_motion_spec_from_stored_dicts():
+    spec = [
+        {"kind": "swing", "amplitude": 45, "cycles": 1, "ticks": 90},
+        {"kind": "loop", "turns": 1, "ticks": 360},
+    ]
+    frames = compile_motion_spec(spec)
+    assert len(frames) == 90 + 360
+    assert frames[90:] == list(range(360))
