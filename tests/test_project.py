@@ -146,6 +146,29 @@ def test_motion_spec_round_trips(tmp_path: Path):
     assert loaded.rotation_frames == 360
 
 
+def test_animation_method_round_trips_and_defaults(tmp_path: Path):
+    project = make_synthetic_project(tmp_path)
+    assert project.animation_method == "frame_sequence"  # default: legacy rides untouched
+
+    project.animation_method = "swing"
+    path = tmp_path / "project.ridepkg.json"
+    project.save(path)
+    assert RideProject.load(path).animation_method == "swing"
+
+
+def test_load_infers_swing_for_pre_field_motion_project(tmp_path: Path):
+    # A project file carrying parametric motion but no animation_method (saved
+    # before the field existed) opens as "swing", not the frame_sequence default.
+    project = make_synthetic_project(tmp_path)
+    data = project.to_dict()
+    data["motion"] = [{"kind": "loop", "turns": 1, "ticks": 90}]
+    data.pop("animation_method", None)
+    path = tmp_path / "legacy.ridepkg.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    assert RideProject.load(path).animation_method == "swing"
+
+
 def test_loading_positions_round_trip_and_int8_clamp(tmp_path: Path):
     project = make_synthetic_project(tmp_path)
     assert project.loading_positions == []  # default: walk to centre

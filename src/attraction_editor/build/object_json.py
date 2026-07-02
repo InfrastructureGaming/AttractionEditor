@@ -61,16 +61,21 @@ def invalidation_bounds(project: RideProject) -> tuple[int, int, int]:
 def flat_ride_animation_block(project: RideProject) -> dict | None:
     """Build the 'flatRideAnimation' dict from the project model.
 
-    Returns None if the project has neither range-based programs nor a
-    parametric motion spec (legacy single-program rides that don't use the
-    flatRideAnimation JSON block).
+    Which source is emitted is decided by project.animation_method - the
+    parametric methods ("swing"/"rotation") emit the compiled motion, otherwise
+    the range-based programs - so the UI's chosen method and the output never
+    diverge. Returns None if the ACTIVE source is empty (legacy single-program
+    rides that don't use the flatRideAnimation JSON block).
     """
-    if not project.programs and not project.motion:
+    parametric = project.animation_method in ("swing", "rotation")
+    if parametric and not project.motion:
+        return None
+    if not parametric and not project.programs:
         return None
 
     half_width, height_above, height_below = invalidation_bounds(project)
 
-    if project.motion:
+    if parametric:
         # Parametric ride: compile the linear motion spec into a MULTI-PHASE
         # program (compile_motion_program splits at repeatable loops so the
         # operator's rotations setting drives the loop count). Each phase carries an

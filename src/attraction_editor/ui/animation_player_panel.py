@@ -43,12 +43,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSpinBox,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -89,17 +87,17 @@ class AnimationPlayerPanel(QWidget):
 
         self.frame_counter_label = QLabel("Frame 0")
 
-        self.car_checks_layout = QVBoxLayout()
+        self.car_checks_layout = QHBoxLayout()
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.play_button)
-        form = QFormLayout()
-        form.addRow("FPS", self.fps_spin)
-        controls.addLayout(form)
-        controls.addWidget(self.frame_counter_label)
-
-        layout = QVBoxLayout()
-        layout.addLayout(controls)
+        # Compact horizontal strip: this panel lives in the Preview's navigation
+        # bar (see main_window), not a controls-column section, so its playback
+        # controls + per-car visibility toggles lay out inline.
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.play_button)
+        layout.addWidget(QLabel("FPS"))
+        layout.addWidget(self.fps_spin)
+        layout.addWidget(self.frame_counter_label)
         layout.addLayout(self.car_checks_layout)
         self.setLayout(layout)
 

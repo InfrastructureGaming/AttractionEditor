@@ -37,6 +37,7 @@ def test_flat_ride_animation_block_compiles_motion_to_explicit_map(tmp_path):
     (the compiled time-to-sprite sequence over the angle atlas), no frame range."""
     project = make_synthetic_project(tmp_path)
     project.frames_per_dir = 360
+    project.animation_method = "swing"
     project.motion = [{"kind": "loop", "turns": 1, "ticks": 360}]
 
     block = flat_ride_animation_block(project)
@@ -50,7 +51,9 @@ def test_flat_ride_animation_block_compiles_motion_to_explicit_map(tmp_path):
     assert "startFrame" not in phases[0]  # explicit map replaces the range
 
 
-def test_motion_spec_takes_precedence_over_range_programs(tmp_path):
+def test_animation_method_selects_source_even_when_both_are_present(tmp_path):
+    """With both datasets stored, animation_method alone decides what's emitted -
+    so the UI's chosen method and the output can never diverge."""
     project = make_synthetic_project(tmp_path)
     project.frames_per_dir = 360
     project.programs = [
@@ -58,9 +61,11 @@ def test_motion_spec_takes_precedence_over_range_programs(tmp_path):
     ]
     project.motion = [{"kind": "loop", "turns": 1, "ticks": 360}]
 
-    phase = flat_ride_animation_block(project)["programs"][0]["phases"][0]
+    project.animation_method = "swing"
+    assert "spriteMap" in flat_ride_animation_block(project)["programs"][0]["phases"][0]
 
-    assert "spriteMap" in phase  # motion wins over the range-based program
+    project.animation_method = "frame_sequence"
+    assert "startFrame" in flat_ride_animation_block(project)["programs"][0]["phases"][0]
 
 
 def test_flat_ride_animation_block_emits_multi_phase_program_with_operator_loop(tmp_path):
@@ -70,6 +75,7 @@ def test_flat_ride_animation_block_emits_multi_phase_program_with_operator_loop(
     project = make_synthetic_project(tmp_path)
     project.frames_per_dir = 392
     project.rotation_frames = 360
+    project.animation_method = "swing"
     project.motion = [
         {"kind": "frames", "start": 391, "end": 389},  # doors close
         {"kind": "swing", "amplitude": 90, "cycles": 1, "ticks": 8},

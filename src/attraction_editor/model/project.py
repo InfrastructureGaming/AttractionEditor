@@ -191,6 +191,14 @@ class RideProject:
     # sheet whose 361-391 are the door sub-animation. 0 = fall back to
     # frames_per_dir (pure-spin rides where the whole sheet IS the rotation).
     rotation_frames: int = 0
+    # Which animation authoring method drives this ride, and therefore which data
+    # the build EMITS - "frame_sequence" (the range-based `programs`) or a
+    # parametric method ("swing"/"rotation", the compiled `motion`). Explicit so
+    # the choice is unambiguous rather than inferred from which field is populated;
+    # both `programs` and `motion` are kept regardless, so switching methods in the
+    # UI never discards work. Default keeps every legacy ride on frame_sequence;
+    # RideProject.load() migrates a pre-field project that carries motion to "swing".
+    animation_method: str = "frame_sequence"
     # At least one preset (see ColourScheme); the first is what preview panels
     # show by default. Written into object.json's properties.carColours on
     # build - never baked into the shipped sprite pixels.
@@ -392,6 +400,12 @@ class RideProject:
         # project file that still carries it.
         known = {f.name for f in fields(cls)}
         data = {k: v for k, v in data.items() if k in known}
+
+        # Migrate a pre-animation_method project: one that carries parametric
+        # motion but no explicit method was authored in the parametric flow, so
+        # open it as "swing" rather than the frame_sequence default.
+        if "animation_method" not in data and data.get("motion"):
+            data["animation_method"] = "swing"
 
         return cls(
             anchors=anchors,

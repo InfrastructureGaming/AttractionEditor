@@ -63,9 +63,10 @@ def test_every_section_is_collapsible(qtbot):
     sections = window.findChildren(CollapsibleSection)
     titles = {s.toggle_button.text() for s in sections}
 
+    # "Programs & Phases" and "Motion (parametric)" are folded into the single
+    # method-switched "Animation" section (see AnimationPanel).
     assert titles == {
-        "Project", "Ride Object", "Layers", "Sprites", "Anchors", "Colours", "Animation",
-        "Programs & Phases", "Motion (parametric)", "Build",
+        "Project", "Ride Object", "Layers", "Sprites", "Anchors", "Colours", "Animation", "Build",
     }
     for section in sections:
         # Default state: only Project starts expanded, everything else

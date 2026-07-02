@@ -47,8 +47,7 @@ from attraction_editor.ui.collapsible_section import CollapsibleSection
 from attraction_editor.ui.colour_preview_panel import ColourPreviewPanel
 from attraction_editor.ui.layers_panel import LayersPanel
 from attraction_editor.ui.preview_widget import PreviewWidget
-from attraction_editor.ui.motion_editor_panel import MotionEditorPanel
-from attraction_editor.ui.program_editor_panel import ProgramEditorPanel
+from attraction_editor.ui.animation_panel import AnimationPanel
 from attraction_editor.ui.project_panel import ProjectPanel
 from attraction_editor.ui.ride_object_panel import RideObjectPanel
 from attraction_editor.ui.sprite_browser_panel import SpriteBrowserPanel
@@ -75,8 +74,7 @@ class MainWindow(QMainWindow):
         self.anchor_editor_panel = AnchorEditorPanel()
         self.colour_preview_panel = ColourPreviewPanel()
         self.animation_player_panel = AnimationPlayerPanel()
-        self.program_editor_panel = ProgramEditorPanel()
-        self.motion_editor_panel = MotionEditorPanel()
+        self.animation_panel = AnimationPanel()
         self.build_panel = BuildPanel()
 
         # Shared preview surface + the one "Direction" selector every
@@ -128,13 +126,16 @@ class MainWindow(QMainWindow):
 
         preview_side = QWidget()
         preview_layout = QVBoxLayout()
-        direction_bar = QHBoxLayout()
-        direction_bar.addStretch()
-        direction_bar.addWidget(self.direction_prev_btn)
-        direction_bar.addWidget(self.direction_label)
-        direction_bar.addWidget(self.direction_next_btn)
-        direction_bar.addStretch()
-        preview_layout.addLayout(direction_bar)
+        # Navigation bar atop the preview: view-rotation (left) groups with the
+        # playback controls (right) - both are "how I'm looking at it", freeing the
+        # Animation section below to be purely "how it moves".
+        nav_bar = QHBoxLayout()
+        nav_bar.addWidget(self.direction_prev_btn)
+        nav_bar.addWidget(self.direction_label)
+        nav_bar.addWidget(self.direction_next_btn)
+        nav_bar.addStretch()
+        nav_bar.addWidget(self.animation_player_panel)
+        preview_layout.addLayout(nav_bar)
         preview_layout.addWidget(self.preview_widget)
         preview_side.setLayout(preview_layout)
 
@@ -149,9 +150,9 @@ class MainWindow(QMainWindow):
         anchors_section.toggled.connect(self.anchor_editor_panel.set_section_expanded)
         controls_column.addWidget(anchors_section)
         controls_column.addWidget(_wrap_in_group("Colours", self.colour_preview_panel))
-        controls_column.addWidget(_wrap_in_group("Animation", self.animation_player_panel))
-        controls_column.addWidget(_wrap_in_group("Programs & Phases", self.program_editor_panel))
-        controls_column.addWidget(_wrap_in_group("Motion (parametric)", self.motion_editor_panel))
+        # Animation authoring lives here (method dropdown -> Programs & Phases OR
+        # Motion editor); playback controls moved up to the preview's nav bar.
+        controls_column.addWidget(_wrap_in_group("Animation", self.animation_panel))
         controls_column.addWidget(_wrap_in_group("Build", self.build_panel))
         # Without this, QVBoxLayout distributes leftover vertical space among
         # the sections themselves once they're collapsed (each stretches to
@@ -307,8 +308,7 @@ class MainWindow(QMainWindow):
         self.sprite_browser_panel.set_project(project)
         self.colour_preview_panel.set_project(project)
         self.animation_player_panel.set_project(project)
-        self.program_editor_panel.set_project(project)
-        self.motion_editor_panel.set_project(project)
+        self.animation_panel.set_project(project)
         self.build_panel.set_project(project)
         self.anchor_editor_panel.set_project(project)
 
