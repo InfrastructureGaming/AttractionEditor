@@ -51,6 +51,18 @@ class ProjectPanel(QWidget):
         self.frames_per_dir_spin = QSpinBox()
         self.frames_per_dir_spin.setRange(1, 65535)
 
+        # Parametric motion only: how many of the sequence frames form the
+        # 360-degree rotation (frame index = degree) when the sheet also holds
+        # non-rotation frames such as a door animation. See RideProject.rotation_frames.
+        self.rotation_frames_spin = QSpinBox()
+        self.rotation_frames_spin.setRange(0, 65535)
+        self.rotation_frames_spin.setToolTip(
+            "Parametric Motion only: how many sequence frames make up the 360-degree\n"
+            "rotation (frame index = degree), when the sheet has extra non-rotation\n"
+            "frames such as a door animation - e.g. 360 for a 392-frame Loop-O-Plane\n"
+            "(361-391 are the doors). 0 = the whole sequence is the rotation."
+        )
+
         self.sprite_width_spin = QSpinBox()
         self.sprite_width_spin.setRange(0, 1024)
         self.sprite_height_spin = QSpinBox()
@@ -99,6 +111,7 @@ class ProjectPanel(QWidget):
         form.addRow("Description", self.description_edit)
         form.addRow("Category", self.category_combo)
         form.addRow("Sequence length (frames)", self.frames_per_dir_spin)
+        form.addRow("Rotation frames (parametric)", self.rotation_frames_spin)
         form.addRow("Sprite width", self.sprite_width_spin)
         form.addRow("Sprite height", self.sprite_height_spin)
         form.addRow("Footprint width (tiles)", self.footprint_width_spin)
@@ -120,6 +133,7 @@ class ProjectPanel(QWidget):
         self.description_edit.textChanged.connect(self._on_simple_field_changed)
         self.category_combo.currentTextChanged.connect(self._on_simple_field_changed)
         self.frames_per_dir_spin.valueChanged.connect(self._on_simple_field_changed)
+        self.rotation_frames_spin.valueChanged.connect(self._on_simple_field_changed)
         self.sprite_width_spin.valueChanged.connect(self._on_simple_field_changed)
         self.sprite_height_spin.valueChanged.connect(self._on_simple_field_changed)
         self.footprint_width_spin.valueChanged.connect(self._on_simple_field_changed)
@@ -141,6 +155,7 @@ class ProjectPanel(QWidget):
             self.description_edit.setText(project.description)
             self.category_combo.setCurrentText(project.category)
             self.frames_per_dir_spin.setValue(project.frames_per_dir)
+            self.rotation_frames_spin.setValue(project.rotation_frames)
             self.sprite_width_spin.setValue(project.sprite_width)
             self.sprite_height_spin.setValue(project.sprite_height)
             self.footprint_width_spin.setValue(project.base_footprint_width)
@@ -163,6 +178,7 @@ class ProjectPanel(QWidget):
         self.project.description = self.description_edit.text()
         self.project.category = self.category_combo.currentText()
         self.project.frames_per_dir = self.frames_per_dir_spin.value()
+        self.project.rotation_frames = self.rotation_frames_spin.value()
         self.project.sprite_width = self.sprite_width_spin.value()
         self.project.sprite_height = self.sprite_height_spin.value()
 

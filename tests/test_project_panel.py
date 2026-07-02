@@ -46,6 +46,19 @@ def test_editing_sprite_height_spin_emits_project_changed(qtbot, tmp_path):
     assert len(calls) == 1
 
 
+def test_rotation_frames_spin_loads_and_writes(qtbot, tmp_path):
+    panel = ProjectPanel()
+    qtbot.addWidget(panel)
+    project = make_synthetic_project(tmp_path)
+    project.rotation_frames = 360
+
+    panel.set_project(project)
+    assert panel.rotation_frames_spin.value() == 360
+
+    panel.rotation_frames_spin.setValue(180)
+    assert project.rotation_frames == 180
+
+
 def test_panel_has_no_separate_negative_positive_fields(qtbot, tmp_path):
     panel = ProjectPanel()
     qtbot.addWidget(panel)
